@@ -299,3 +299,61 @@ fn as_counter(i: u32) -> usize {
 fn from_counter(n: usize) -> u32 {
     (-(n as u32 as i32)) as u32
 }
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use super::super::types::*;
+    use super::super::common::saca_tiny;
+    use super::sacak32;
+
+    #[test]
+    fn tablecheck_sacak32() {
+        let texts: &[&[u32]] = &[
+            &[],
+            &[0],
+            &[0, 0, 0, 0, 0, 0],
+            &[2, 0, 2, 0, 2, 1, 4, 3],
+            &[3, 2, 1, 3, 2, 3, 2, 1, 0, 1],
+            &[2, 1, 4, 1, 1, 4, 1, 3, 1],
+            &[2, 1, 1, 3, 3, 1, 1, 3, 3, 1, 2, 1],
+            &[2, 2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 1],
+            &[
+                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0, 2,
+                1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2, 2, 2,
+                1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
+            ],
+        ];
+
+        for &text in texts.iter() {
+            assert_eq!(sacak(text), naive(text));
+        }
+    }
+
+    quickcheck! {
+        fn quickcheck_sacak8(text: Vec<u32>) -> bool {
+            naive(&text[..]) == sacak(&text[..])
+        }
+    }
+
+    fn sacak(text: &[u32]) -> Vec<u32> {
+        let mut dic = BTreeMap::new();
+        text.iter().for_each(|&c| { dic.insert(c, 0); });
+
+        let mut k = 1;
+        for (_, v) in &mut dic {
+            *v = k - 1;
+            k += 1;
+        }
+        let mut text: Vec<_> = text.iter().map(|c| *dic.get(c).unwrap() as u32).collect();
+
+        let mut suf = vec![0u32; text.len()];
+        sacak32(&mut text[..], &mut suf[..], k);
+        suf
+    }
+
+    fn naive(text: &[u32]) -> Vec<u32> {
+        let mut suf = vec![0u32; text.len()];
+        saca_tiny(text, &mut suf[..]);
+        suf
+    }
+}
