@@ -16,6 +16,21 @@ where
     });
 }
 
+/// Test if character is s-typed.
+#[inline]
+pub fn is_schar<C: SacaChar>(text: &[C], i: usize) -> bool {
+    let c = text[i];
+    for &next in text[i + 1..].iter() {
+        if c < next {
+            return true;
+        }
+        if c > next {
+            return false;
+        }
+    }
+    false
+}
+
 /// Enumerate characters and types, in reversed order.
 #[inline]
 pub fn foreach_typedchars<C, F>(text: &[C], mut f: F)
@@ -23,17 +38,41 @@ where
     C: SacaChar,
     F: FnMut(usize, bool, C),
 {
+    let n = text.len();
     if text.len() < 1 {
         return;
     }
 
-    let mut prev = text[text.len() - 1];
+    let mut prev = text[n - 1];
     let mut stype = false;
-    f(text.len() - 1, false, prev);
+    f(n - 1, false, prev);
 
-    for (i, &c) in text[..text.len() - 1].iter().enumerate().rev() {
+    for (i, &c) in text[..n - 1].iter().enumerate().rev() {
         stype = c < prev || (c == prev && stype);
-        f(i, false, prev);
+        prev = c;
+        f(i, stype, c);
+    }
+}
+/// Enumerate characters and types, in reversed order.
+#[inline]
+pub fn foreach_typedchars_mut<C, F>(text: &mut [C], mut f: F)
+where
+    C: SacaChar,
+    F: FnMut(usize, bool, &mut C),
+{
+    let n = text.len();
+    if text.len() < 1 {
+        return;
+    }
+
+    let mut prev = text[n - 1];
+    let mut stype = false;
+    f(n - 1, false, &mut text[n - 1]);
+
+    for (i, p) in text[..n - 1].iter_mut().enumerate().rev() {
+        stype = *p < prev || (*p == prev && stype);
+        prev = *p;
+        f(i, stype, p);
     }
 }
 
@@ -119,7 +158,7 @@ fn lmssubstrs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     let mut n = 1;
 
     // upslope and plateau.
-    while text[i + n] >= text[i + n - 1] {
+    while i + n < text.len() && text[i + n] >= text[i + n - 1] {
         n += 1;
     }
 
@@ -143,11 +182,7 @@ fn lmssubstrs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
 
 /// Debug inspector.
 #[allow(unused)]
-pub fn inspect<C, I>(text: &[C], suf: &[I], cursors: &[usize])
-where
-    C: SacaChar,
-    I: SacaIndex,
-{
+pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     use term_table::row::Row;
     use term_table::table_cell::{Alignment, TableCell};
     use term_table::{Table, TableStyle};
@@ -156,11 +191,16 @@ where
     let n = text.len();
 
     let mut table = Table::new();
-    let align = Alignment::Right;
+    table.max_column_width = 150;
     table.style = TableStyle::blank();
+    table.style.horizontal = '-';
+    table.style.outer_top_horizontal = '-';
+    table.style.outer_bottom_horizontal = '-';
+    table.separate_rows = false;
+    let align = Alignment::Center;
 
     let mut num_row = vec![TableCell::new("")];
-    (0..n).for_each(|i| num_row.push(TableCell::new_with_alignment(i, 1, align)));
+    (0..n).for_each(|i| num_row.push(TableCell::new_with_alignment(format!("[{}]", i), 1, align)));
     table.add_row(Row::new(num_row));
 
     let mut txt_row = vec![TableCell::new("text")];
@@ -168,10 +208,12 @@ where
         .for_each(|&c| txt_row.push(TableCell::new_with_alignment(c, 1, align)));
     table.add_row(Row::new(txt_row));
 
-    let mut suf_row = vec![TableCell::new("suf")];
-    suf.iter()
-        .for_each(|&i| suf_row.push(TableCell::new_with_alignment(i, 1, align)));
-    table.add_row(Row::new(suf_row));
+    let mut typ = vec![""; n];
+    foreach_typedchars(text, |i, t, _| typ[i] = if t { "S" } else { "L" });
+    let mut typ_row = vec![TableCell::new("type")];
+    typ.iter()
+        .for_each(|&s| typ_row.push(TableCell::new_with_alignment(s, 1, align)));
+    table.add_row(Row::new(typ_row));
 
     let mut lms = vec![""; n];
     foreach_lmschars(text, |i, _| lms[i] = "*");
@@ -180,12 +222,50 @@ where
         .for_each(|&s| lms_row.push(TableCell::new_with_alignment(s, 1, align)));
     table.add_row(Row::new(lms_row));
 
+    let mut suf_row = vec![TableCell::new("suf")];
+    suf.iter().for_each(|&i| {
+        let val;
+        if i == 1 << 31 {
+            val = String::from("E");
+        } else {
+            val = format!("{}", i as i32);
+        }
+        suf_row.push(TableCell::new_with_alignment(val, 1, align))
+    });
+    table.add_row(Row::new(suf_row));
+
+    let mut bkt = vec![String::new(); n];
+    let mut bkt_head = vec![0; n + 1];
+    text.iter().for_each(|&c| bkt_head[c.as_index() + 1] += 1);
+    bkt_head[1..].iter_mut().fold(0, |sum, p| {
+        *p += sum;
+        *p
+    });
+    let mut bkt_tail = Vec::from(&bkt_head[1..]);
+    foreach_typedchars(text, |_, stype, c| {
+        let i = c.as_index();
+        if stype {
+            bkt_tail[i] -= 1;
+            bkt[bkt_tail[i]] = format!("{}S", c);
+        } else {
+            bkt[bkt_head[i]] = format!("{}L", c);
+            bkt_head[i] += 1;
+        }
+    });
+    let mut bkt_row = vec![TableCell::new("bkt")];
+    bkt.iter()
+        .for_each(|s| bkt_row.push(TableCell::new_with_alignment(s, 1, align)));
+    table.add_row(Row::new(bkt_row));
+
     if cursors.len() > 0 {
-        let mut ptr = vec![""; n];
-        cursors.iter().for_each(|&p| ptr[p] = "^");
+        let mut ptr = vec![String::new(); n];
+        cursors.iter().enumerate().for_each(|(i, &p)| {
+            let c = std::char::from_u32('i' as u32 + i as u32).unwrap_or('!');
+            ptr[p] = format!("↑\n{}", c);
+        });
         let mut ptr_row = vec![TableCell::new("ptr")];
         ptr.iter()
-            .for_each(|&p| ptr_row.push(TableCell::new_with_alignment(p, 1, align)));
+            .for_each(|p| ptr_row.push(TableCell::new_with_alignment(p, 1, align)));
         table.add_row(Row::new(ptr_row));
     }
 

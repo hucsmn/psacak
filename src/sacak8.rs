@@ -4,7 +4,7 @@ use super::common::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
-/// Sort suffix array of byte string.
+/// Sort suffix array for byte string.
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     debug_assert!(text.len() <= suf.len());
     let suf = &mut suf[..text.len()];
@@ -30,10 +30,11 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     }
 
     // sort lms-substrings lexicographically in the head of workspace.
-    if make_subproblem(text, suf, n) < n {
+    let k = make_subproblem(text, suf, n);
+    if k < n {
         {
-            let (suf1, text1) = suf.split_at_mut(suf.len() - n);
-            sacak32(text1, suf1);
+            let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
+            sacak32(subtext, subsuf, k);
         }
 
         // get the original problem.
@@ -60,6 +61,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.reset_tail();
     suf.iter_mut().for_each(|p| *p = 0);
+
     foreach_lmschars(text, |i, c| {
         let p = &mut bkt[c.as_index()];
         *p -= 1;
@@ -67,42 +69,42 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     });
 }
 
-/// Put the sorted lms-suffixes from the head of workspace.
+/// Put the sorted lms-suffixes in head of workspace to the right place.
 fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
     bkt.reset_tail();
     suf[n..].iter_mut().for_each(|p| *p = 0);
-    let mut i = n;
-    foreach_lmschars(text, |_, c| {
-        let p = &mut bkt[c.as_index()];
+
+    for i in (0..n).rev() {
+        let x = suf[i];
+        suf[i] = 0;
+
+        let p = &mut bkt[text[x.as_index()].as_index()];
         *p -= 1;
-        i -= 1;
-        if *p != i {
-            suf[*p] = suf[i];
-            suf[i] = 0;
-        }
-    });
+        suf[*p] = x;
+    }
 }
 
 /// Induce (left most) l-typed characters from left most s-type characters.
 fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     bkt.reset_head();
 
-    // sentinel
+    // sentinel.
     let p = &mut bkt[text[text.len() - 1].as_index()];
     suf[*p] = u32::from_index(text.len() - 1);
     *p += 1;
 
     for i in 0..suf.len() {
         if suf[i] > 0 {
-            // non-empty, and has preceding character
+            // non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
             let p = &mut bkt[text[j].as_index()];
             if text[j] >= text[j + 1] {
-                // preceding character is l-type
+                // preceding character is l-type.
                 suf[*p] = u32::from_index(j);
                 *p += 1;
-                if left_most {
-                    // leave left most l-type characters only
+                if left_most || is_schar(text, suf[i].as_index()) {
+                    // clean up lms-characters.
+                    // when left_most is toggled, leave lml-type characters only.
                     suf[i] = 0;
                 }
             }
@@ -116,15 +118,16 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 
     for i in (0..suf.len()).rev() {
         if suf[i] > 0 {
-            // non-empty, and has preceding character
+            // non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
             let p = &mut bkt[text[j].as_index()];
-            if text[j] <= text[j + 1] && *p <= i {
-                // preceding character is s-type
+            if text[j] <= text[j + 1] {
+                //&& *p <= i
+                // preceding character is s-type.
                 *p -= 1;
                 suf[*p] = u32::from_index(j);
                 if left_most {
-                    // leave left most s-type characters only
+                    // leave lms-characters only.
                     suf[i] = 0;
                 }
             }
