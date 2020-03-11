@@ -9,7 +9,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     debug_assert!(text.len() <= suf.len());
     let suf = &mut suf[..text.len()];
 
-    if text.len() < 3 {
+    if text.len() <= 3 {
         saca_tiny(text, suf);
         return;
     }
@@ -62,9 +62,9 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 /// Map integer characters to bucket pointers, keeping character types unchanged.
 fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
     // make bucket.
-    suf[..=k].iter_mut().for_each(|p| *p = 0);
-    text.iter().for_each(|&c| suf[c.as_index() + 1] += 1);
-    suf[1..=k].iter_mut().fold(0, |sum, p| {
+    suf[..k].iter_mut().for_each(|p| *p = 0);
+    text.iter().for_each(|&c| suf[c.as_index()] += 1);
+    suf[..k].iter_mut().fold(0, |sum, p| {
         *p += sum;
         *p
     });
@@ -73,9 +73,9 @@ fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
     foreach_typedchars_mut(text, |i, stype, p| {
         let c = p.as_index();
         if !stype {
-            *p = suf[c];
+            *p = if c > 0 { suf[c - 1] } else { 0 };
         } else {
-            *p = suf[c + 1] - 1;
+            *p = suf[c] - 1;
         }
     })
 }
@@ -126,20 +126,19 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
 fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     suf[n..].iter_mut().for_each(|p| *p = EMPTY);
 
-    let mut q = 0;
-    let mut prev = text.len();
+    let mut prev = text.len(); // any integer not in text.
+    let mut m = 0; // destination bucket offset counter.
     for i in (0..n).rev() {
         let x = suf[i];
         suf[i] = EMPTY;
 
-        // copy by bucket.
         let p = text[x.as_index()].as_index();
         if p != prev {
-            prev = p;
-            q = p;
+            m = 0;
         }
-        suf[p] = x;
-        q = q.wrapping_sub(1);
+        suf[p - m] = x;
+        prev = p;
+        m += 1;
     }
 }
 

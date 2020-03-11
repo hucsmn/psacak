@@ -9,7 +9,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     debug_assert!(text.len() <= suf.len());
     let suf = &mut suf[..text.len()];
 
-    if text.len() < 3 {
+    if text.len() <= 3 {
         saca_tiny(text, suf);
         return;
     }
@@ -184,5 +184,53 @@ impl IndexMut<usize> for Buckets {
     #[inline(always)]
     fn index_mut(&mut self, i: usize) -> &mut Self::Output {
         &mut self.ptrs[i]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::types::*;
+    use super::super::common::saca_tiny;
+    use super::sacak8;
+
+    #[test]
+    fn tablecheck_sacak8() {
+        let texts: &[&[u8]] = &[
+            &[],
+            &[0],
+            &[0, 0, 0, 0, 0, 0],
+            &[2, 0, 2, 0, 2, 1, 4, 3],
+            &[3, 2, 1, 3, 2, 3, 2, 1, 0, 1],
+            &[2, 1, 4, 1, 1, 4, 1, 3, 1],
+            &[2, 1, 1, 3, 3, 1, 1, 3, 3, 1, 2, 1],
+            &[2, 2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 1],
+            &[
+                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0, 2,
+                1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2, 2, 2,
+                1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
+            ],
+        ];
+
+        for &text in texts.iter() {
+            assert_eq!(sacak(text), naive(text));
+        }
+    }
+
+    quickcheck! {
+        fn quickcheck_sacak8(text: Vec<u8>) -> bool {
+            naive(&text[..]) == sacak(&text[..])
+        }
+    }
+
+    fn sacak(text: &[u8]) -> Vec<u32> {
+        let mut suf = vec![0u32; text.len()];
+        sacak8(text, &mut suf[..]);
+        suf
+    }
+
+    fn naive(text: &[u8]) -> Vec<u32> {
+        let mut suf = vec![0u32; text.len()];
+        saca_tiny(text, &mut suf[..]);
+        suf
     }
 }
