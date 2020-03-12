@@ -6,7 +6,6 @@ use super::types::*;
 
 /// Sort suffix array for byte string.
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
-    debug_assert!(text.len() <= suf.len());
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {

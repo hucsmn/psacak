@@ -1,14 +1,13 @@
 [package]
 name = "psacak"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2018"
 
 [dependencies]
-rayon = "1.3"
-byteorder = "*"
+
+[target.'cfg(debug)'.dependencies]
 term-table = "1.2"
 
 [dev-dependencies]
-rand = "*"
 quickcheck = "0.9"
 quickcheck_macros = "0.9"

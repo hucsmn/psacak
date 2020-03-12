@@ -6,35 +6,22 @@ extern crate quickcheck;
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
 
-mod common;
-mod pipeline;
-mod sacak32;
-mod sacak8;
-mod types;
+mod sacak;
 
 use std::env;
 use std::fs;
-use std::time;
-use std::path;
 use std::io;
-
-use byteorder::{NativeEndian, WriteBytesExt};
+use std::time;
 
 fn main() {
-    for inname in env::args().skip(1) {
-        eprintln!("* {} *", inname);
-        let data = fs::read(&inname).unwrap();
-        eprintln!("load file `{}` of {} bytes", inname, data.len());
-
-        let mut suf = vec![0u32; data.len()];
-        let ((), t) = timeit(|| sacak8::sacak8(&data[..], &mut suf[..]));
-        eprintln!("construct suffix array in {:.3}s", t.as_secs_f64());
-
-        let mut outname = path::PathBuf::from(inname);
-        outname.set_extension("suffix");
-        eprintln!("store file `{:?}` of {} bytes", outname.as_path(), 4 * suf.len());
-        let mut file = io::BufWriter::new(fs::File::create(outname.as_path()).unwrap());
-        suf.iter().cloned().for_each(|x| file.write_u32::<NativeEndian>(x).unwrap());
+    for name in env::args().skip(1) {
+        eprintln!("* {} *", name);
+        let text = fs::read(&name).unwrap();
+        eprintln!("load: {} bytes", text.len());
+        let mut suf = vec![0; text.len()];
+        let ((), dur) = timeit(|| sacak::sacak(&text[..], &mut suf[..]));
+        eprintln!("saca-k: runs in {:.3}s", dur.as_secs_f64());
+        eprintln!("validate: {}", validate(&text[..], &suf[..]));
         eprintln!("");
     }
 }
@@ -47,4 +34,13 @@ where
     let ret = f();
     let dur = start.elapsed();
     (ret, dur)
+}
+
+fn validate(text: &[u8], suf: &[u32]) -> bool {
+    for i in 1..suf.len() {
+        if text[suf[i - 1] as usize..] >= text[suf[i] as usize..] {
+            return false;
+        }
+    }
+    true
 }

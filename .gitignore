@@ -1,3 +1,6 @@
-/reference/
 /target/
 /Cargo.lock
+
+/reference/
+/bench/data/
+/bench/result/

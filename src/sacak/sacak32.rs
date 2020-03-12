@@ -6,7 +6,6 @@ const EMPTY: u32 = 1 << 31;
 
 /// Sort suffix array for integer string (alphabet size k).
 pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
-    debug_assert!(text.len() <= suf.len());
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {
@@ -366,6 +365,9 @@ mod tests {
             *v = k;
             k += 1;
         }
-        (text.iter().map(|c| *dic.get(c).unwrap() as u32).collect(), k)
+        (
+            text.iter().map(|c| *dic.get(c).unwrap() as u32).collect(),
+            k,
+        )
     }
 }

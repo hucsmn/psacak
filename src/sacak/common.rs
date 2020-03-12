@@ -1,14 +1,15 @@
 use super::types::*;
 
-/// Naive suffix array construction algorithm that works on tiny input.
+/// Naive suffix array construction that sorts tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
 where
     C: SacaChar,
     I: SacaIndex,
 {
-    for i in 0..text.len() {
-        suf[i] = I::from_index(i);
-    }
+    suf[..text.len()]
+        .iter_mut()
+        .enumerate()
+        .for_each(|(i, p)| *p = I::from_index(i));
     suf[..text.len()].sort_by(|&i, &j| {
         let i = i.as_index();
         let j = j.as_index();
@@ -143,7 +144,7 @@ fn lmssubstrs_equal<C: SacaChar>(text: &[C], mut i: usize, mut j: usize) -> bool
         std::mem::swap(&mut i, &mut j);
     }
 
-    // typically, lms-substrings are very short
+    // lengths of lms-substrings are typically dvery short.
     let m = lmssubstrs_getlen(text, i);
     let n = lmssubstrs_getlen(text, j);
     m == n && j <= text.len() - n && text[i..i + m] == text[j..j + n]
@@ -181,6 +182,7 @@ fn lmssubstrs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
 }
 
 /// Debug inspector.
+#[cfg(debug)]
 #[allow(unused)]
 pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     use term_table::row::Row;
@@ -190,6 +192,7 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     assert_eq!(text.len(), suf.len());
     let n = text.len();
 
+    // table style.
     let mut table = Table::new();
     table.max_column_width = 150;
     table.style = TableStyle::blank();
@@ -199,15 +202,18 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     table.separate_rows = false;
     let align = Alignment::Center;
 
+    // indeices.
     let mut num_row = vec![TableCell::new("")];
     (0..n).for_each(|i| num_row.push(TableCell::new_with_alignment(format!("[{}]", i), 1, align)));
     table.add_row(Row::new(num_row));
 
+    // characters.
     let mut txt_row = vec![TableCell::new("text")];
     text.iter()
         .for_each(|&c| txt_row.push(TableCell::new_with_alignment(c, 1, align)));
     table.add_row(Row::new(txt_row));
 
+    // types.
     let mut typ = vec![""; n];
     foreach_typedchars(text, |i, t, _| typ[i] = if t { "S" } else { "L" });
     let mut typ_row = vec![TableCell::new("type")];
@@ -215,6 +221,7 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
         .for_each(|&s| typ_row.push(TableCell::new_with_alignment(s, 1, align)));
     table.add_row(Row::new(typ_row));
 
+    // lms marks.
     let mut lms = vec![""; n];
     foreach_lmschars(text, |i, _| lms[i] = "*");
     let mut lms_row = vec![TableCell::new("lms")];
@@ -222,6 +229,7 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
         .for_each(|&s| lms_row.push(TableCell::new_with_alignment(s, 1, align)));
     table.add_row(Row::new(lms_row));
 
+    // workspace.
     let mut suf_row = vec![TableCell::new("suf")];
     suf.iter().for_each(|&i| {
         let val;
@@ -234,6 +242,7 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     });
     table.add_row(Row::new(suf_row));
 
+    // bucket indicators.
     let mut bkt = vec![String::new(); n];
     let mut bkt_head = vec![0; n + 1];
     text.iter().for_each(|&c| bkt_head[c.as_index() + 1] += 1);
@@ -257,6 +266,7 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
         .for_each(|s| bkt_row.push(TableCell::new_with_alignment(s, 1, align)));
     table.add_row(Row::new(bkt_row));
 
+    // additional cursors.
     if cursors.len() > 0 {
         let mut ptr = vec![String::new(); n];
         cursors.iter().enumerate().for_each(|(i, &p)| {
