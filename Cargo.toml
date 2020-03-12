@@ -11,3 +11,6 @@ term-table = "1.2"
 [dev-dependencies]
 quickcheck = "0.9"
 quickcheck_macros = "0.9"
+
+[profile.release]
+debug = true

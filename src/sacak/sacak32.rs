@@ -59,6 +59,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 }
 
 /// Map integer characters to bucket pointers, keeping character types unchanged.
+#[inline(never)]
 fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
     // make bucket.
     suf[..k].iter_mut().for_each(|p| *p = 0);
@@ -80,6 +81,7 @@ fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
 }
 
 /// Put lms-characters.
+#[inline(never)]
 fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     suf.iter_mut().for_each(|p| *p = EMPTY);
 
@@ -122,6 +124,7 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
 }
 
 /// Put the sorted lms-suffixes in head of workspace to the right place.
+#[inline(never)]
 fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     suf[n..].iter_mut().for_each(|p| *p = EMPTY);
 
@@ -143,6 +146,7 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
 }
 
 /// Induce (left most) l-typed characters from left most s-type characters.
+#[inline(never)]
 fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     // sentinel.
     let p = text[text.len() - 1].as_index();
@@ -219,6 +223,7 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
 }
 
 /// Induce (left most) s-typed characters from (left most) l-type characters.
+#[inline(never)]
 fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = text.len() - 1;
     loop {

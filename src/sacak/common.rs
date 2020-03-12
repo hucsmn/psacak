@@ -18,7 +18,7 @@ where
 }
 
 /// Test if character is s-typed.
-#[inline]
+#[inline(always)]
 pub fn is_schar<C: SacaChar>(text: &[C], i: usize) -> bool {
     let c = text[i];
     for &next in text[i + 1..].iter() {
@@ -33,7 +33,6 @@ pub fn is_schar<C: SacaChar>(text: &[C], i: usize) -> bool {
 }
 
 /// Enumerate characters and types, in reversed order.
-#[inline]
 pub fn foreach_typedchars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
@@ -55,7 +54,6 @@ where
     }
 }
 /// Enumerate characters and types, in reversed order.
-#[inline]
 pub fn foreach_typedchars_mut<C, F>(text: &mut [C], mut f: F)
 where
     C: SacaChar,
@@ -78,7 +76,6 @@ where
 }
 
 /// Enumerate lms-characters, in reversed order.
-#[inline]
 pub fn foreach_lmschars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
@@ -138,7 +135,6 @@ where
 }
 
 /// Test if lms-substrings are equal (support sentinel).
-#[inline]
 fn lmssubstrs_equal<C: SacaChar>(text: &[C], mut i: usize, mut j: usize) -> bool {
     if i > j {
         std::mem::swap(&mut i, &mut j);
@@ -150,7 +146,7 @@ fn lmssubstrs_equal<C: SacaChar>(text: &[C], mut i: usize, mut j: usize) -> bool
     m == n && j <= text.len() - n && text[i..i + m] == text[j..j + n]
 }
 
-#[inline]
+#[inline(always)]
 fn lmssubstrs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     if i == text.len() {
         return 1;

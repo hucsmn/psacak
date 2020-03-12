@@ -5,6 +5,7 @@ use super::sacak32::sacak32;
 use super::types::*;
 
 /// Sort suffix array for byte string.
+#[inline(never)]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     let suf = &mut suf[..text.len()];
 
@@ -57,6 +58,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 }
 
 /// Put lms-characters.
+#[inline(never)]
 fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.reset_tail();
     suf.iter_mut().for_each(|p| *p = 0);
@@ -69,6 +71,7 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 }
 
 /// Put the sorted lms-suffixes in head of workspace to the right place.
+#[inline(never)]
 fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
     bkt.reset_tail();
     suf[n..].iter_mut().for_each(|p| *p = 0);
@@ -84,6 +87,7 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
 }
 
 /// Induce (left most) l-typed characters from left most s-type characters.
+#[inline(never)]
 fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     bkt.reset_head();
 
@@ -112,6 +116,7 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 }
 
 /// Induce (left most) s-typed characters from (left most) l-type characters.
+#[inline(never)]
 fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     bkt.reset_tail();
 
@@ -140,7 +145,7 @@ struct Buckets {
 }
 
 impl Buckets {
-    #[inline]
+    #[inline(always)]
     pub fn new(text: &[u8]) -> Self {
         let mut bkt = Buckets {
             ptrs: [0; 256],
@@ -154,14 +159,14 @@ impl Buckets {
         bkt
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn reset_head(&mut self) {
         for i in 0..256 {
             self.ptrs[i] = self.cache[i]
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn reset_tail(&mut self) {
         for i in 0..256 {
             self.ptrs[i] = self.cache[i + 1]
