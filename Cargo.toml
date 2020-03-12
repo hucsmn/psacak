@@ -5,7 +5,10 @@ edition = "2018"
 
 [dependencies]
 rayon = "1.3"
+byteorder = "*"
 term-table = "1.2"
 
 [dev-dependencies]
+rand = "*"
 quickcheck = "0.9"
+quickcheck_macros = "0.9"

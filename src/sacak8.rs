@@ -121,8 +121,7 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             // non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
             let p = &mut bkt[text[j].as_index()];
-            if text[j] <= text[j + 1] {
-                //&& *p <= i
+            if text[j] <= text[j + 1] && *p <= i {
                 // preceding character is s-type.
                 *p -= 1;
                 suf[*p] = u32::from_index(j);
@@ -187,10 +186,11 @@ impl IndexMut<usize> for Buckets {
     }
 }
 
+// tests for sacak8.
 #[cfg(test)]
 mod tests {
-    use super::super::types::*;
     use super::super::common::saca_tiny;
+    use super::super::types::*;
     use super::sacak8;
 
     #[test]
@@ -199,36 +199,41 @@ mod tests {
             &[],
             &[0],
             &[0, 0, 0, 0, 0, 0],
+            &[0, 0, 0, 0, 0, 1],
+            &[5, 4, 3, 2, 1, 0],
+            &[3, 4, 5, 2, 0, 1],
             &[2, 0, 2, 0, 2, 1, 4, 3],
             &[3, 2, 1, 3, 2, 3, 2, 1, 0, 1],
             &[2, 1, 4, 1, 1, 4, 1, 3, 1],
             &[2, 1, 1, 3, 3, 1, 1, 3, 3, 1, 2, 1],
             &[2, 2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 1],
+            &[6, 8, 9, 5, 2, 4, 3, 0, 0, 7, 1, 2],
             &[
-                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0, 2,
-                1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2, 2, 2,
-                1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
+                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0,
+                2, 1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2,
+                2, 2, 1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
             ],
         ];
 
         for &text in texts.iter() {
-            assert_eq!(sacak(text), naive(text));
+            assert_eq!(calc_sacak8(text), calc_naive8(text));
         }
     }
 
-    quickcheck! {
-        fn quickcheck_sacak8(text: Vec<u8>) -> bool {
-            naive(&text[..]) == sacak(&text[..])
-        }
+    #[quickcheck]
+    fn quickcheck_sacak8(text: Vec<u8>) -> bool {
+        calc_sacak8(&text[..]) == calc_naive8(&text[..])
     }
 
-    fn sacak(text: &[u8]) -> Vec<u32> {
+    // helpers.
+
+    fn calc_sacak8(text: &[u8]) -> Vec<u32> {
         let mut suf = vec![0u32; text.len()];
         sacak8(text, &mut suf[..]);
         suf
     }
 
-    fn naive(text: &[u8]) -> Vec<u32> {
+    fn calc_naive8(text: &[u8]) -> Vec<u32> {
         let mut suf = vec![0u32; text.len()];
         saca_tiny(text, &mut suf[..]);
         suf

@@ -126,8 +126,9 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
 fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     suf[n..].iter_mut().for_each(|p| *p = EMPTY);
 
-    let mut prev = text.len(); // any integer not in text.
-    let mut m = 0; // destination bucket offset counter.
+    // copy sorted lms-suffixes bucket by bucket.
+    let mut prev = text.len();
+    let mut m = 0;
     for i in (0..n).rev() {
         let x = suf[i];
         suf[i] = EMPTY;
@@ -156,10 +157,10 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = 0;
     while i < suf.len() {
         if suf[i] > 0 && suf[i] < EMPTY {
-            // non-empty, and has preceding character.
+            // text[suf[i]] is non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
             if text[j] >= text[j + 1] {
-                // preceding character is l-type.
+                // preceding character text[j] is l-type.
                 let p = text[j].as_index();
                 if suf[p] < EMPTY {
                     // left shift the borrowed chunk.
@@ -206,15 +207,15 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
 
     // clean up counters.
     for i in 0..suf.len() {
-        if left_most && suf[i] == 0 {
-            // text[0] is not lms-character.
-            suf[i] = EMPTY;
-        }
         if suf[i] > EMPTY {
             let n = as_counter(suf[i]);
             suf.copy_within(i + 1..i + 1 + n, i);
             suf[i + n] = EMPTY;
         }
+    }
+    if left_most {
+        // text[0] is not lml-character.
+        suf.iter_mut().filter(|p| **p == 0).for_each(|p| *p = EMPTY);
     }
 }
 
@@ -223,10 +224,10 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = text.len() - 1;
     loop {
         if suf[i] > 0 && suf[i] < EMPTY {
-            // non-empty, and has preceding character.
+            // text[suf[i]] is non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
-            if text[j] <= text[j + 1] {
-                // preceding character is s-type.
+            if text[j] < text[j + 1] || (text[j] == text[j + 1] && text[j].as_index() > i) {
+                // preceding character text[j] is s-type.
                 let p = text[j].as_index();
                 if suf[p] < EMPTY {
                     // right shift the borrowed chunk.
@@ -277,16 +278,16 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
     }
 
     // clean up counters.
-    for i in (1..suf.len()).rev() {
-        if left_most && suf[i] == 0 {
-            // text[0] is not lms-character.
-            suf[i] = EMPTY;
-        }
+    for i in (0..suf.len()).rev() {
         if suf[i] > EMPTY {
             let n = as_counter(suf[i]);
             suf.copy_within(i - n..i, i - n + 1);
             suf[i - n] = EMPTY;
         }
+    }
+    if left_most {
+        // text[0] is not lms-character.
+        suf.iter_mut().filter(|p| **p == 0).for_each(|p| *p = EMPTY);
     }
 }
 
@@ -299,12 +300,14 @@ fn as_counter(i: u32) -> usize {
 fn from_counter(n: usize) -> u32 {
     (-(n as u32 as i32)) as u32
 }
+
+// tests for sacak32.
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-    use super::super::types::*;
     use super::super::common::saca_tiny;
+    use super::super::types::*;
     use super::sacak32;
+    use std::collections::BTreeMap;
 
     #[test]
     fn tablecheck_sacak32() {
@@ -312,48 +315,57 @@ mod tests {
             &[],
             &[0],
             &[0, 0, 0, 0, 0, 0],
+            &[0, 0, 0, 0, 0, 1],
+            &[5, 4, 3, 2, 1, 0],
+            &[3, 4, 5, 2, 0, 1],
             &[2, 0, 2, 0, 2, 1, 4, 3],
             &[3, 2, 1, 3, 2, 3, 2, 1, 0, 1],
             &[2, 1, 4, 1, 1, 4, 1, 3, 1],
             &[2, 1, 1, 3, 3, 1, 1, 3, 3, 1, 2, 1],
             &[2, 2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 1],
+            &[6, 8, 9, 5, 2, 4, 3, 0, 0, 7, 1, 2],
             &[
-                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0, 2,
-                1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2, 2, 2,
-                1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
+                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0,
+                2, 1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2,
+                2, 2, 1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
             ],
         ];
 
         for &text in texts.iter() {
-            assert_eq!(sacak(text), naive(text));
+            assert_eq!(calc_sacak32(text), calc_naive(text));
         }
     }
 
-    quickcheck! {
-        fn quickcheck_sacak8(text: Vec<u32>) -> bool {
-            naive(&text[..]) == sacak(&text[..])
-        }
+    #[quickcheck]
+    fn quickcheck_sacak32(text: Vec<u32>) -> bool {
+        calc_sacak32(&text[..]) == calc_naive(&text[..])
     }
 
-    fn sacak(text: &[u32]) -> Vec<u32> {
-        let mut dic = BTreeMap::new();
-        text.iter().for_each(|&c| { dic.insert(c, 0); });
+    // helpers.
 
-        let mut k = 1;
-        for (_, v) in &mut dic {
-            *v = k - 1;
-            k += 1;
-        }
-        let mut text: Vec<_> = text.iter().map(|c| *dic.get(c).unwrap() as u32).collect();
-
+    fn calc_sacak32(text: &[u32]) -> Vec<u32> {
+        let (mut text, k) = reduce_alphabet(text);
         let mut suf = vec![0u32; text.len()];
         sacak32(&mut text[..], &mut suf[..], k);
         suf
     }
 
-    fn naive(text: &[u32]) -> Vec<u32> {
+    fn calc_naive(text: &[u32]) -> Vec<u32> {
         let mut suf = vec![0u32; text.len()];
         saca_tiny(text, &mut suf[..]);
         suf
+    }
+
+    fn reduce_alphabet(text: &[u32]) -> (Vec<u32>, usize) {
+        let mut dic = BTreeMap::new();
+        text.iter().for_each(|&c| {
+            dic.insert(c, 0);
+        });
+        let mut k = 0;
+        for (_, v) in &mut dic {
+            *v = k;
+            k += 1;
+        }
+        (text.iter().map(|c| *dic.get(c).unwrap() as u32).collect(), k)
     }
 }
