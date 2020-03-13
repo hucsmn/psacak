@@ -60,11 +60,11 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 /// Put lms-characters.
 #[inline(never)]
 fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
-    bkt.reset_tail();
+    bkt.set_tail();
     suf.iter_mut().for_each(|p| *p = 0);
 
     foreach_lmschars(text, |i, c| {
-        let p = &mut bkt[c.as_index()];
+        let p = &mut bkt[c];
         *p -= 1;
         suf[*p] = u32::from_index(i);
     });
@@ -73,14 +73,14 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 /// Put the sorted lms-suffixes in head of workspace to the right place.
 #[inline(never)]
 fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
-    bkt.reset_tail();
+    bkt.set_tail();
     suf[n..].iter_mut().for_each(|p| *p = 0);
 
     for i in (0..n).rev() {
         let x = suf[i];
         suf[i] = 0;
 
-        let p = &mut bkt[text[x.as_index()].as_index()];
+        let p = &mut bkt[text[x.as_index()]];
         *p -= 1;
         suf[*p] = x;
     }
@@ -89,10 +89,10 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
 /// Induce (left most) l-typed characters from left most s-type characters.
 #[inline(never)]
 fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
-    bkt.reset_head();
+    bkt.set_head();
 
     // sentinel.
-    let p = &mut bkt[text[text.len() - 1].as_index()];
+    let p = &mut bkt[text[text.len() - 1]];
     suf[*p] = u32::from_index(text.len() - 1);
     *p += 1;
 
@@ -100,7 +100,7 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
         if suf[i] > 0 {
             // non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
-            let p = &mut bkt[text[j].as_index()];
+            let p = &mut bkt[text[j]];
             if text[j] >= text[j + 1] {
                 // preceding character is l-type.
                 suf[*p] = u32::from_index(j);
@@ -118,13 +118,13 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 /// Induce (left most) s-typed characters from (left most) l-type characters.
 #[inline(never)]
 fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
-    bkt.reset_tail();
+    bkt.set_tail();
 
     for i in (0..suf.len()).rev() {
         if suf[i] > 0 {
             // non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
-            let p = &mut bkt[text[j].as_index()];
+            let p = &mut bkt[text[j]];
             if text[j] <= text[j + 1] && *p <= i {
                 // preceding character is s-type.
                 *p -= 1;
@@ -160,33 +160,33 @@ impl Buckets {
     }
 
     #[inline(always)]
-    pub fn reset_head(&mut self) {
+    pub fn set_head(&mut self) {
         for i in 0..256 {
             self.ptrs[i] = self.cache[i]
         }
     }
 
     #[inline(always)]
-    pub fn reset_tail(&mut self) {
+    pub fn set_tail(&mut self) {
         for i in 0..256 {
             self.ptrs[i] = self.cache[i + 1]
         }
     }
 }
 
-impl Index<usize> for Buckets {
+impl Index<u8> for Buckets {
     type Output = usize;
 
     #[inline(always)]
-    fn index(&self, i: usize) -> &Self::Output {
-        &self.ptrs[i]
+    fn index(&self, i: u8) -> &Self::Output {
+        &self.ptrs[i as usize]
     }
 }
 
-impl IndexMut<usize> for Buckets {
+impl IndexMut<u8> for Buckets {
     #[inline(always)]
-    fn index_mut(&mut self, i: usize) -> &mut Self::Output {
-        &mut self.ptrs[i]
+    fn index_mut(&mut self, i: u8) -> &mut Self::Output {
+        &mut self.ptrs[i as usize]
     }
 }
 
