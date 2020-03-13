@@ -70,9 +70,9 @@ fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
     });
 
     // l-type => bucket_head, s-type => bucket_tail - 1.
-    foreach_typedchars_mut(text, |i, stype, p| {
+    foreach_typedchars_mut(text, |i, t, p| {
         let c = p.as_index();
-        if !stype {
+        if !t.stype {
             *p = if c > 0 { suf[c - 1] } else { 0 };
         } else {
             *p = suf[c] - 1;

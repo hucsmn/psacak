@@ -32,69 +32,109 @@ pub fn is_schar<C: SacaChar>(text: &[C], i: usize) -> bool {
     false
 }
 
+/// Character type.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct SacaCharType {
+    pub stype: bool,
+    pub left_most: bool,
+}
+
+impl SacaCharType {
+    #[inline(always)]
+    pub fn is_lms(self) -> bool {
+        self.stype && self.left_most
+    }
+
+    #[inline(always)]
+    pub fn is_lml(self) -> bool {
+        !self.stype && self.left_most
+    }
+}
+
 /// Enumerate characters and types, in reversed order.
+#[inline]
 pub fn foreach_typedchars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
-    F: FnMut(usize, bool, C),
+    F: FnMut(usize, SacaCharType, C),
 {
     let n = text.len();
-    if text.len() < 1 {
+    if n == 0 {
         return;
     }
 
-    let mut prev = text[n - 1];
     let mut stype = false;
-    f(n - 1, false, prev);
-
-    for (i, &c) in text[..n - 1].iter().enumerate().rev() {
-        stype = c < prev || (c == prev && stype);
-        prev = c;
-        f(i, stype, c);
+    for i in (1..n).rev() {
+        let next_stype = text[i - 1] < text[i] || (text[i - 1] == text[i] && stype);
+        let left_most = stype != next_stype;
+        f(i, SacaCharType { stype, left_most }, text[i]);
+        stype = next_stype;
     }
+    f(
+        0,
+        SacaCharType {
+            stype,
+            left_most: false,
+        },
+        text[0],
+    );
 }
+
 /// Enumerate characters and types, in reversed order.
+#[inline]
 pub fn foreach_typedchars_mut<C, F>(text: &mut [C], mut f: F)
 where
     C: SacaChar,
-    F: FnMut(usize, bool, &mut C),
+    F: FnMut(usize, SacaCharType, &mut C),
 {
     let n = text.len();
-    if text.len() < 1 {
+    if n == 0 {
         return;
     }
 
-    let mut prev = text[n - 1];
     let mut stype = false;
-    f(n - 1, false, &mut text[n - 1]);
-
-    for (i, p) in text[..n - 1].iter_mut().enumerate().rev() {
-        stype = *p < prev || (*p == prev && stype);
-        prev = *p;
-        f(i, stype, p);
+    for i in (1..n).rev() {
+        let next_stype = text[i - 1] < text[i] || (text[i - 1] == text[i] && stype);
+        let left_most = stype != next_stype;
+        f(i, SacaCharType { stype, left_most }, &mut text[i]);
+        stype = next_stype;
     }
+    f(
+        0,
+        SacaCharType {
+            stype,
+            left_most: false,
+        },
+        &mut text[0],
+    );
 }
 
-/// Enumerate lms-characters, in reversed order.
+/// Specialized lms-characters enumerator, in reversed order.
+#[inline]
 pub fn foreach_lmschars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
     F: FnMut(usize, C),
 {
-    if text.len() < 3 {
-        return;
-    }
-
-    let mut stype = text[text.len() - 2] < text[text.len() - 1];
-    for i in (1..text.len() - 1).rev() {
-        let c = text[i];
-        let next = text[i - 1];
-        let next_stype = next < c || (next == c && stype);
-        if stype && !next_stype {
-            f(i, c);
+    foreach_typedchars(text, |i, t, c| {
+        if t.is_lms() {
+            f(i, c)
         }
-        stype = next_stype;
-    }
+    });
+}
+
+/// Specialized lml-characters enumerator, in reversed order.
+#[inline]
+pub fn foreach_lmlchars<C, F>(text: &[C], mut f: F)
+where
+    C: SacaChar,
+    F: FnMut(usize, C),
+{
+    foreach_typedchars(text, |i, t, c| {
+        if t.is_lml() {
+            f(i, c)
+        }
+    });
 }
 
 /// Make subproblem in the tail of workspace with alphabet size `k`, from the sorted lms-substrings in the head.
@@ -140,7 +180,7 @@ fn lmssubstrs_equal<C: SacaChar>(text: &[C], mut i: usize, mut j: usize) -> bool
         std::mem::swap(&mut i, &mut j);
     }
 
-    // lengths of lms-substrings are typically dvery short.
+    // lengths of lms-substrings are typically very short.
     let m = lmssubstrs_getlen(text, i);
     let n = lmssubstrs_getlen(text, j);
     m == n && j <= text.len() - n && text[i..i + m] == text[j..j + n]
@@ -211,7 +251,7 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
 
     // types.
     let mut typ = vec![""; n];
-    foreach_typedchars(text, |i, t, _| typ[i] = if t { "S" } else { "L" });
+    foreach_typedchars(text, |i, t, _| typ[i] = if t.stype { "S" } else { "L" });
     let mut typ_row = vec![TableCell::new("type")];
     typ.iter()
         .for_each(|&s| typ_row.push(TableCell::new_with_alignment(s, 1, align)));
@@ -219,8 +259,14 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
 
     // lms marks.
     let mut lms = vec![""; n];
-    foreach_lmschars(text, |i, _| lms[i] = "*");
-    let mut lms_row = vec![TableCell::new("lms")];
+    foreach_typedchars(text, |i, t, _| {
+        if t.islms() {
+            lms[i] = "*"
+        } else if t.islml() {
+            lms[i] = "+"
+        }
+    });
+    let mut lms_row = vec![TableCell::new("lms/lml")];
     lms.iter()
         .for_each(|&s| lms_row.push(TableCell::new_with_alignment(s, 1, align)));
     table.add_row(Row::new(lms_row));
@@ -247,9 +293,9 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
         *p
     });
     let mut bkt_tail = Vec::from(&bkt_head[1..]);
-    foreach_typedchars(text, |_, stype, c| {
+    foreach_typedchars(text, |_, t, c| {
         let i = c.as_index();
-        if stype {
+        if t.stype {
             bkt_tail[i] -= 1;
             bkt[bkt_tail[i]] = format!("{}S", c);
         } else {

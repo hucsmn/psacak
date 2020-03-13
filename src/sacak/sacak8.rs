@@ -66,7 +66,7 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     foreach_lmschars(text, |i, c| {
         let p = &mut bkt[c];
         *p -= 1;
-        suf[*p] = u32::from_index(i);
+        suf[p.as_index()] = u32::from_index(i);
     });
 }
 
@@ -82,7 +82,7 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
 
         let p = &mut bkt[text[x.as_index()]];
         *p -= 1;
-        suf[*p] = x;
+        suf[p.as_index()] = x;
     }
 }
 
@@ -93,7 +93,7 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 
     // sentinel.
     let p = &mut bkt[text[text.len() - 1]];
-    suf[*p] = u32::from_index(text.len() - 1);
+    suf[p.as_index()] = u32::from_index(text.len() - 1);
     *p += 1;
 
     for i in 0..suf.len() {
@@ -103,7 +103,7 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             let p = &mut bkt[text[j]];
             if text[j] >= text[j + 1] {
                 // preceding character is l-type.
-                suf[*p] = u32::from_index(j);
+                suf[p.as_index()] = u32::from_index(j);
                 *p += 1;
                 if left_most || is_schar(text, suf[i].as_index()) {
                     // clean up lms-characters.
@@ -125,10 +125,10 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             // non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
             let p = &mut bkt[text[j]];
-            if text[j] <= text[j + 1] && *p <= i {
+            if text[j] <= text[j + 1] && p.as_index() <= i {
                 // preceding character is s-type.
                 *p -= 1;
-                suf[*p] = u32::from_index(j);
+                suf[p.as_index()] = u32::from_index(j);
                 if left_most {
                     // leave lms-characters only.
                     suf[i] = 0;
@@ -140,8 +140,8 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 
 /// Byte string bucket pointers.
 struct Buckets {
-    ptrs: [usize; 256],
-    cache: [usize; 257],
+    ptrs: [u32; 256],
+    cache: [u32; 257],
 }
 
 impl Buckets {
@@ -175,7 +175,7 @@ impl Buckets {
 }
 
 impl Index<u8> for Buckets {
-    type Output = usize;
+    type Output = u32;
 
     #[inline(always)]
     fn index(&self, i: u8) -> &Self::Output {
