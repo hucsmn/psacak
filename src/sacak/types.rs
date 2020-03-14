@@ -14,19 +14,19 @@ pub trait Uint:
     + Debug
     + Display
     + ToString
-    + Add
-    + Sub
-    + Not
-    + BitAnd
-    + BitOr
-    + BitXor
-    + Shl<u8>
-    + Shr<u8>
-    + AddAssign
-    + SubAssign
-    + BitAndAssign
-    + BitOrAssign
-    + BitXorAssign
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
+    + Not<Output = Self>
+    + BitAnd<Self, Output = Self>
+    + BitOr<Self, Output = Self>
+    + BitXor<Self, Output = Self>
+    + Shl<u8, Output = Self>
+    + Shr<u8, Output = Self>
+    + AddAssign<Self>
+    + SubAssign<Self>
+    + BitAndAssign<Self>
+    + BitOrAssign<Self>
+    + BitXorAssign<Self>
     + ShlAssign<u8>
     + ShrAssign<u8>
 {

@@ -4,6 +4,9 @@ use super::common::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
+/// Sort lms-substrings by inducing.
+const LMS_INDUCE: bool = false;
+
 /// Sort suffix array for byte string.
 #[inline(never)]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
@@ -14,31 +17,14 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
         return;
     }
 
-    let mut bkt = Buckets::new(text);
+    let mut bkt = Buckets::new();
 
-    // sort lms-substrings.
-    let mut n; // count of lms-suffixes.
-    let mut k; // alphabet size of the subproblem.
-    if LMS_INDUCE {
-        // induce sort lms-substrings.
-        put_lmschars(text, suf, &mut bkt);
-        induce_lchars(text, suf, &mut bkt, true);
-        induce_schars(text, suf, &mut bkt, true);
-
-        // collect sorted lms-substrings into the head of workspace.
-        n = 0;
-        for i in 0..suf.len() {
-            if suf[i] > 0 {
-                suf[n] = suf[i];
-                n += 1;
-            }
-        }
-
-        // get ranks of lms-substrings into the tail of workspace.
-        k = rank_sorted_lmssubs(text, suf, n);
+    // sort and rank lms-substrings.
+    let (n, k) = if LMS_INDUCE {
+        induce_sort_lmssubs(text, suf, &mut bkt)
     } else {
-        unimplemented!();
-    }
+        direct_sort_lmssubs(text, suf, &mut bkt)
+    };
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings
@@ -65,6 +51,67 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     put_lmssufs(text, suf, &mut bkt, n);
     induce_lchars(text, suf, &mut bkt, false);
     induce_schars(text, suf, &mut bkt, false);
+}
+
+/// Induce sort and rank lms-substrings.
+///
+/// Returns count of lms-substrings (placed in the head of workspace),
+/// and upper bound or alphabet size of ranks (placed in the tail of workspace).
+fn induce_sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> (usize, usize) {
+    // induce sort lms-substrings.
+    bkt.init(text);
+    put_lmschars(text, suf, bkt);
+    induce_lchars(text, suf, bkt, true);
+    induce_schars(text, suf, bkt, true);
+
+    // collect sorted lms-substrings into the head of workspace.
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] > 0 {
+            suf[n] = suf[i];
+            n += 1;
+        }
+    }
+
+    // get ranks of lms-substrings into the tail of workspace.
+    let k = rank_sorted_lmssubs(text, suf, n);
+    (n, k)
+}
+
+/// Direct sort and rank lms-substrings.
+///
+/// Returns count of lms-substrings (placed in the head of workspace),
+/// and upper bound or alphabet size of ranks (placed in the tail of workspace).
+fn direct_sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> (usize, usize) {
+    // make buckets for lms-substrings.
+    let mut n = 0;
+    for c in 1..=255u8 {
+        bkt[c] = 0;
+    }
+    foreach_lmschars(text, |_, c| {
+        bkt[c] += 1;
+        n += 1;
+    });
+    bkt[0] *= 2;
+    for c in 1..=255u8 {
+        bkt[c] = bkt[c] * 2 + bkt[c - 1];
+    }
+
+    // place lms-substrings together with lengths in buckets.
+    // the layout is like: [idx0, len0, idx1, len1, ...].
+    let mut j = text.len();
+    foreach_lmschars(text, |i, c| {
+        let p = &mut bkt[c];
+        *p -= 2;
+        suf[p.as_index()] = i as u32; // lms-substring index.
+        suf[p.as_index() + 1] = (j - i + 1) as u32; // lms-substring length.
+        j = i;
+    });
+    bkt.init(text);
+
+    // sort and rank lms-substrings with lengths in suf[..2*n].
+    let k = sortnrank_lengthed_lmssubs(text, suf, n);
+    (n, k)
 }
 
 /// Put lms-characters.
@@ -155,28 +202,31 @@ struct Buckets {
 }
 
 impl Buckets {
-    #[inline(always)]
-    pub fn new(text: &[u8]) -> Self {
-        let mut bkt = Buckets {
+    #[inline]
+    pub fn new() -> Self {
+        Buckets {
             ptrs: [0; 256],
             cache: [0; 257],
-        };
-        text.iter().for_each(|&c| bkt.cache[c.as_index() + 1] += 1);
-        bkt.cache[1..].iter_mut().fold(0, |sum, p| {
+        }
+    }
+
+    #[inline]
+    pub fn init(&mut self, text: &[u8]) {
+        text.iter().for_each(|&c| self.cache[c.as_index() + 1] += 1);
+        self.cache[1..].iter_mut().fold(0, |sum, p| {
             *p += sum;
             *p
         });
-        bkt
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_head(&mut self) {
         for i in 0..256 {
             self.ptrs[i] = self.cache[i]
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_tail(&mut self) {
         for i in 0..256 {
             self.ptrs[i] = self.cache[i + 1]

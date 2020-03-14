@@ -4,6 +4,9 @@ use super::types::*;
 /// Empty mark in the workspace.
 const EMPTY: u32 = 1 << 31;
 
+/// Sort lms-substrings by inducing.
+const LMS_INDUCE: bool = true;
+
 /// Sort suffix array for integer string (alphabet size k).
 pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     let suf = &mut suf[..text.len()];

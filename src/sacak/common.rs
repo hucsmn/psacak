@@ -1,8 +1,6 @@
 use super::types::*;
 use std::cmp::Ordering;
 
-pub const LMS_INDUCE: bool = true;
-
 /// Naive suffix array construction that sorts tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
 where
@@ -229,7 +227,7 @@ pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     n
 }
 
-/// Get ranks of the sorted lms-substrings (in the head) to the tail of workspace.
+/// Get ranks of the sorted lms-substrings in the head, to the tail of workspace.
 pub fn rank_sorted_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
@@ -241,22 +239,97 @@ where
 
     // insert ranks of lms-substrings by their occurrence order in text.
     let mut k = 1;
-    let mut p = lmssubs_getlen(text, suf[0].as_index());
+    let mut dy = lmssubs_getlen(text, suf[0].as_index());
     let (lmssubs, work) = suf.split_at_mut(n);
     work.iter_mut().for_each(|p| *p = I::MAX);
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     for i in 1..n {
         let x = lmssubs[i].as_index();
         let y = lmssubs[i - 1].as_index();
-        let q = lmssubs_getlen(text, x);
-        if p != q || !lmssubs_equal(text, x, y, p) {
+        let dx = lmssubs_getlen(text, x);
+        if dx != dy || !lmssubs_equal(text, x, y, dx) {
             k += 1;
         }
         work[x / 2] = I::from_index(k - 1);
-        p = q;
+        dy = dx;
     }
 
-    // compact ranks to tail if needed.
+    // compact ranks to the tail if needed.
+    if k < n {
+        let mut p = work.len();
+        for i in (0..work.len()).rev() {
+            if work[i] != I::MAX {
+                p -= 1;
+                work[p] = work[i];
+            }
+        }
+    }
+    k
+}
+
+/// Sort and rank lengthed lms-substrings (format: [idx0, len0, idx1, len1, ...]) in the head,
+/// to the tail of workspace.
+pub fn sortnrank_lengthed_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    let hi_mask = I::ONE << (I::BIT_WIDTH - 1);
+    let lo_mask = (I::ONE << (I::BIT_WIDTH - 1)) - I::ONE;
+    debug_assert!(text.len() < hi_mask.as_index());
+
+    if n <= 1 {
+        return n;
+    }
+
+    // perform quick sort.
+    {
+        // dirty trick to reuse workspace and improve memory locality.
+        let lmssubs: &mut [(I, I)] = unsafe {
+            use std::mem::{align_of, size_of, transmute};
+            use std::slice::from_raw_parts_mut;
+            debug_assert_eq!(size_of::<I>() * 2, size_of::<(I, I)>());
+            debug_assert_eq!(align_of::<I>(), align_of::<(I, I)>());
+            from_raw_parts_mut(transmute(&mut suf[0] as *mut I), n)
+        };
+        lmssubs.sort_by(|x, y| {
+            let &(i, m) = x;
+            let &(j, n) = y;
+            lmssubs_compare(text, i.as_index(), m.as_index(), j.as_index(), n.as_index())
+        });
+    }
+
+    // mark equality in the highest bit, and compact lms-suffixes to the head.
+    for i in 1..n {
+        let x = (suf[2 * i - 2] & lo_mask).as_index();
+        let dx = suf[2 * i - 1].as_index();
+        let y = suf[2 * i].as_index();
+        let dy = suf[2 * i + 1].as_index();
+        if dx != dy || !lmssubs_equal(text, x, y, dx) {
+            suf[2 * i] |= hi_mask;
+        }
+    }
+
+    // compact sorted lms-substrings (with a bit mark) to the head of workspace.
+    for i in 1..n {
+        suf[i] = suf[2 * i];
+    }
+
+    // insert ranks of lms-substrings by their occurrence order in text.
+    let mut k = 1;
+    let (lmssubs, work) = suf.split_at_mut(n);
+    work.iter_mut().for_each(|p| *p = I::MAX);
+    work[lmssubs[0].as_index() / 2] = I::ZERO;
+    for i in 1..n {
+        let x = (lmssubs[i] & lo_mask).as_index();
+        if (lmssubs[i] & hi_mask) != I::ZERO {
+            k += 1;
+        }
+        lmssubs[i] &= lo_mask;
+        work[x / 2] = I::from_index(k - 1);
+    }
+
+    // compact ranks to the tail if needed.
     if k < n {
         let mut p = work.len();
         for i in (0..work.len()).rev() {
@@ -276,9 +349,6 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     use term_table::table_cell::{Alignment, TableCell};
     use term_table::{Table, TableStyle};
 
-    assert_eq!(text.len(), suf.len());
-    let n = text.len();
-
     // table style.
     let mut table = Table::new();
     table.max_column_width = 150;
@@ -290,74 +360,85 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     let align = Alignment::Center;
 
     // indeices.
+    let n = Ord::max(text.len(), suf.len());
     let mut num_row = vec![TableCell::new("")];
     (0..n).for_each(|i| num_row.push(TableCell::new_with_alignment(format!("[{}]", i), 1, align)));
     table.add_row(Row::new(num_row));
 
-    // characters.
-    let mut txt_row = vec![TableCell::new("text")];
-    text.iter()
-        .for_each(|&c| txt_row.push(TableCell::new_with_alignment(c, 1, align)));
-    table.add_row(Row::new(txt_row));
+    if text.len() > 0 {
+        let n = text.len();
 
-    // types.
-    let mut typ = vec![""; n];
-    foreach_typedchars(text, |i, t, _| typ[i] = if t.stype { "S" } else { "L" });
-    let mut typ_row = vec![TableCell::new("type")];
-    typ.iter()
-        .for_each(|&s| typ_row.push(TableCell::new_with_alignment(s, 1, align)));
-    table.add_row(Row::new(typ_row));
+        // characters.
+        let mut txt_row = vec![TableCell::new("text")];
+        text.iter()
+            .for_each(|&c| txt_row.push(TableCell::new_with_alignment(c, 1, align)));
+        table.add_row(Row::new(txt_row));
 
-    // lms marks.
-    let mut lms = vec![""; n];
-    foreach_typedchars(text, |i, t, _| {
-        if t.is_lms() {
-            lms[i] = "*"
-        } else if t.is_lml() {
-            lms[i] = "+"
+        // types.
+        let mut typ = vec![""; n];
+        foreach_typedchars(text, |i, t, _| typ[i] = if t.stype { "S" } else { "L" });
+        let mut typ_row = vec![TableCell::new("type")];
+        typ.iter()
+            .for_each(|&s| typ_row.push(TableCell::new_with_alignment(s, 1, align)));
+        table.add_row(Row::new(typ_row));
+
+        // lms marks.
+        let mut lms = vec![""; n];
+        foreach_typedchars(text, |i, t, _| {
+            if t.is_lms() {
+                lms[i] = "*"
+            } else if t.is_lml() {
+                lms[i] = "+"
+            }
+        });
+        let mut lms_row = vec![TableCell::new("lms/lml")];
+        lms.iter()
+            .for_each(|&s| lms_row.push(TableCell::new_with_alignment(s, 1, align)));
+        table.add_row(Row::new(lms_row));
+    }
+
+    if suf.len() > 0 {
+        let n = suf.len();
+
+        // workspace.
+        let mut suf_row = vec![TableCell::new("suf")];
+        suf.iter().for_each(|&i| {
+            let val;
+            if i == 1 << 31 {
+                val = String::from("E");
+            } else {
+                val = format!("{}", i as i32);
+            }
+            suf_row.push(TableCell::new_with_alignment(val, 1, align))
+        });
+        table.add_row(Row::new(suf_row));
+
+        if text.len() == text.len() {
+            // bucket indicators.
+            let mut bkt = vec![String::new(); n];
+            let mut bkt_head = vec![0; n + 1];
+            text.iter().for_each(|&c| bkt_head[c.as_index() + 1] += 1);
+            bkt_head[1..].iter_mut().fold(0, |sum, p| {
+                *p += sum;
+                *p
+            });
+            let mut bkt_tail = Vec::from(&bkt_head[1..]);
+            foreach_typedchars(text, |_, t, c| {
+                let i = c.as_index();
+                if t.stype {
+                    bkt_tail[i] -= 1;
+                    bkt[bkt_tail[i]] = format!("{}S", c);
+                } else {
+                    bkt[bkt_head[i]] = format!("{}L", c);
+                    bkt_head[i] += 1;
+                }
+            });
+            let mut bkt_row = vec![TableCell::new("bkt")];
+            bkt.iter()
+                .for_each(|s| bkt_row.push(TableCell::new_with_alignment(s, 1, align)));
+            table.add_row(Row::new(bkt_row));
         }
-    });
-    let mut lms_row = vec![TableCell::new("lms/lml")];
-    lms.iter()
-        .for_each(|&s| lms_row.push(TableCell::new_with_alignment(s, 1, align)));
-    table.add_row(Row::new(lms_row));
-
-    // workspace.
-    let mut suf_row = vec![TableCell::new("suf")];
-    suf.iter().for_each(|&i| {
-        let val;
-        if i == 1 << 31 {
-            val = String::from("E");
-        } else {
-            val = format!("{}", i as i32);
-        }
-        suf_row.push(TableCell::new_with_alignment(val, 1, align))
-    });
-    table.add_row(Row::new(suf_row));
-
-    // bucket indicators.
-    let mut bkt = vec![String::new(); n];
-    let mut bkt_head = vec![0; n + 1];
-    text.iter().for_each(|&c| bkt_head[c.as_index() + 1] += 1);
-    bkt_head[1..].iter_mut().fold(0, |sum, p| {
-        *p += sum;
-        *p
-    });
-    let mut bkt_tail = Vec::from(&bkt_head[1..]);
-    foreach_typedchars(text, |_, t, c| {
-        let i = c.as_index();
-        if t.stype {
-            bkt_tail[i] -= 1;
-            bkt[bkt_tail[i]] = format!("{}S", c);
-        } else {
-            bkt[bkt_head[i]] = format!("{}L", c);
-            bkt_head[i] += 1;
-        }
-    });
-    let mut bkt_row = vec![TableCell::new("bkt")];
-    bkt.iter()
-        .for_each(|s| bkt_row.push(TableCell::new_with_alignment(s, 1, align)));
-    table.add_row(Row::new(bkt_row));
+    }
 
     // additional cursors.
     if cursors.len() > 0 {
@@ -373,4 +454,31 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     }
 
     eprintln!("{}", table.render());
+}
+
+#[macro_export]
+macro_rules! inspect_here {
+    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect($text, $suf, &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect($text, &[], &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );* => suf: $suf:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect(b"", $suf, &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+        }
+    };
 }
