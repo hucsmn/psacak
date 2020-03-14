@@ -1,4 +1,7 @@
 use super::types::*;
+use std::cmp::Ordering;
+
+pub const LMS_INDUCE: bool = true;
 
 /// Naive suffix array construction that sorts tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
@@ -137,57 +140,66 @@ where
     });
 }
 
-/// Make subproblem in the tail of workspace with alphabet size `k`, from the sorted lms-substrings in the head.
-///
-/// Returns the alphabet size `k`.
-pub fn make_subproblem<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
-where
-    C: SacaChar,
-    I: SacaIndex,
-{
-    let (subs, work) = suf.split_at_mut(n);
-    work.iter_mut().for_each(|p| *p = I::MAX);
-
-    // rename lms-substrings, and do bucket sort by index value.
-    let mut k = 0;
-    let mut prev = text.len();
-    for &i in subs.iter() {
-        let x = i.as_index();
-        if !lmssubstrs_equal(text, x, prev) {
-            k += 1;
-        }
-        work[x / 2] = I::from_index(k - 1);
-        prev = x;
+/// Comapre two lms-substrings of known lengths.
+#[inline]
+pub fn lmssubs_compare<C: SacaChar>(
+    text: &[C],
+    i: usize,
+    m: usize,
+    j: usize,
+    n: usize,
+) -> Ordering {
+    let p = i + m;
+    let q = j + n;
+    if i == j {
+        debug_assert!(p == q && p <= text.len() + 1);
+        return Ordering::Equal;
     }
 
-    // no need to gather subproblem if k==n.
-    if k < n {
-        let mut p = work.len();
-        for i in (0..work.len()).rev() {
-            if work[i] != I::MAX {
-                p -= 1;
-                work[p] = work[i];
-            }
+    if p <= text.len() && q <= text.len() {
+        Ord::cmp(&text[i..p], &text[j..q])
+    } else if p > text.len() {
+        debug_assert!(q <= text.len() && p == text.len() + 1);
+        let order = Ord::cmp(&text[i..], &text[j..q]);
+        if order != Ordering::Equal {
+            order
+        } else {
+            Ordering::Less
+        }
+    } else {
+        debug_assert!(p <= text.len() && q == text.len() + 1);
+        let order = Ord::cmp(&text[i..p], &text[j..]);
+        if order != Ordering::Equal {
+            order
+        } else {
+            Ordering::Greater
         }
     }
-
-    k
 }
 
-/// Test if lms-substrings are equal (support sentinel).
-fn lmssubstrs_equal<C: SacaChar>(text: &[C], mut i: usize, mut j: usize) -> bool {
-    if i > j {
-        std::mem::swap(&mut i, &mut j);
+/// Test if two lms-substrings of known length are equal.
+#[inline]
+pub fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, j: usize, n: usize) -> bool {
+    let p = i + n;
+    let q = j + n;
+    if i == j {
+        debug_assert!(p <= text.len() + 1);
     }
 
-    // lengths of lms-substrings are typically very short.
-    let m = lmssubstrs_getlen(text, i);
-    let n = lmssubstrs_getlen(text, j);
-    m == n && j <= text.len() - n && text[i..i + m] == text[j..j + n]
+    if p <= text.len() && q <= text.len() {
+        &text[i..p] == &text[j..q]
+    } else if p > text.len() {
+        debug_assert!(q <= text.len() && p == text.len() + 1);
+        false
+    } else {
+        debug_assert!(p <= text.len() && q == text.len() + 1);
+        false
+    }
 }
 
-#[inline(always)]
-fn lmssubstrs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
+/// Calculate the length of lms-substring (probably contains sentinel).
+#[inline]
+pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     if i == text.len() {
         return 1;
     }
@@ -217,8 +229,47 @@ fn lmssubstrs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     n
 }
 
+/// Get ranks of the sorted lms-substrings (in the head) to the tail of workspace.
+pub fn rank_sorted_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    if n == 0 {
+        return 0;
+    }
+
+    // insert ranks of lms-substrings by their occurrence order in text.
+    let mut k = 1;
+    let mut p = lmssubs_getlen(text, suf[0].as_index());
+    let (lmssubs, work) = suf.split_at_mut(n);
+    work.iter_mut().for_each(|p| *p = I::MAX);
+    work[lmssubs[0].as_index() / 2] = I::ZERO;
+    for i in 1..n {
+        let x = lmssubs[i].as_index();
+        let y = lmssubs[i - 1].as_index();
+        let q = lmssubs_getlen(text, x);
+        if p != q || !lmssubs_equal(text, x, y, p) {
+            k += 1;
+        }
+        work[x / 2] = I::from_index(k - 1);
+        p = q;
+    }
+
+    // compact ranks to tail if needed.
+    if k < n {
+        let mut p = work.len();
+        for i in (0..work.len()).rev() {
+            if work[i] != I::MAX {
+                p -= 1;
+                work[p] = work[i];
+            }
+        }
+    }
+    k
+}
+
 /// Debug inspector.
-#[cfg(debug)]
 #[allow(unused)]
 pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     use term_table::row::Row;
@@ -260,9 +311,9 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     // lms marks.
     let mut lms = vec![""; n];
     foreach_typedchars(text, |i, t, _| {
-        if t.islms() {
+        if t.is_lms() {
             lms[i] = "*"
-        } else if t.islml() {
+        } else if t.is_lml() {
             lms[i] = "+"
         }
     });

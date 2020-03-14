@@ -13,26 +13,35 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
         return;
     }
 
-    // make bucket pointers bt rewriting text.
+    // make bucket pointers by rewriting text.
     transform_text(text, suf, k);
 
-    // induce sort lms-substrings.
-    put_lmschars(text, suf);
-    induce_lchars(text, suf, true);
-    induce_schars(text, suf, true);
+    // sort lms-substrings.
+    let mut n; // count of lms-suffixes.
+    let mut k; // alphabet size of the subproblem.
+    if LMS_INDUCE {
+        // induce sort lms-substrings.
+        put_lmschars(text, suf);
+        induce_lchars(text, suf, true);
+        induce_schars(text, suf, true);
 
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] < EMPTY {
-            suf[n] = suf[i];
-            n += 1;
+        // collect sorted lms-substrings into the head of workspace.
+        n = 0;
+        for i in 0..suf.len() {
+            if suf[i] < EMPTY {
+                suf[n] = suf[i];
+                n += 1;
+            }
         }
+
+        // get ranks of lms-substrings into the tail of workspace.
+        k = rank_sorted_lmssubs(text, suf, n);
+    } else {
+        unimplemented!();
     }
 
-    // sort lms-substrings lexicographically in the head of workspace.
-    let k = make_subproblem(text, suf, n);
     if k < n {
+        // order of lms-suffixes != order of lms-substrings
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);

@@ -4,9 +4,7 @@ version = "0.0.1"
 edition = "2018"
 
 [dependencies]
-libc = { version = "0.2", features = ["extra_traits"] }
-
-[target.'cfg(debug)'.dependencies]
+libc = "0.2"
 term-table = "1.2"
 
 [dev-dependencies]

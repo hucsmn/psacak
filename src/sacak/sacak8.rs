@@ -14,24 +14,34 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
         return;
     }
 
-    // induce sort lms-substrings.
     let mut bkt = Buckets::new(text);
-    put_lmschars(text, suf, &mut bkt);
-    induce_lchars(text, suf, &mut bkt, true);
-    induce_schars(text, suf, &mut bkt, true);
 
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] > 0 {
-            suf[n] = suf[i];
-            n += 1;
+    // sort lms-substrings.
+    let mut n; // count of lms-suffixes.
+    let mut k; // alphabet size of the subproblem.
+    if LMS_INDUCE {
+        // induce sort lms-substrings.
+        put_lmschars(text, suf, &mut bkt);
+        induce_lchars(text, suf, &mut bkt, true);
+        induce_schars(text, suf, &mut bkt, true);
+
+        // collect sorted lms-substrings into the head of workspace.
+        n = 0;
+        for i in 0..suf.len() {
+            if suf[i] > 0 {
+                suf[n] = suf[i];
+                n += 1;
+            }
         }
+
+        // get ranks of lms-substrings into the tail of workspace.
+        k = rank_sorted_lmssubs(text, suf, n);
+    } else {
+        unimplemented!();
     }
 
-    // sort lms-substrings lexicographically in the head of workspace.
-    let k = make_subproblem(text, suf, n);
     if k < n {
+        // order of lms-suffixes != order of lms-substrings
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);
@@ -58,7 +68,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 }
 
 /// Put lms-characters.
-#[inline(never)]
+#[inline]
 fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.set_tail();
     suf.iter_mut().for_each(|p| *p = 0);
@@ -71,7 +81,7 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 }
 
 /// Put the sorted lms-suffixes in head of workspace to the right place.
-#[inline(never)]
+#[inline]
 fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
     bkt.set_tail();
     suf[n..].iter_mut().for_each(|p| *p = 0);
@@ -87,7 +97,7 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
 }
 
 /// Induce (left most) l-typed characters from left most s-type characters.
-#[inline(never)]
+#[inline]
 fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     bkt.set_head();
 
@@ -116,7 +126,7 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 }
 
 /// Induce (left most) s-typed characters from (left most) l-type characters.
-#[inline(never)]
+#[inline]
 fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     bkt.set_tail();
 
