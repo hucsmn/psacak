@@ -2,5 +2,6 @@
 /Cargo.lock
 
 /reference/
+/bench/bin/
 /bench/data/
 /bench/result/

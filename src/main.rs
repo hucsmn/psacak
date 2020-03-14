@@ -11,19 +11,43 @@ mod sacak;
 use std::env;
 use std::fs;
 use std::io;
+use std::mem;
+use std::process;
 use std::time;
 
+use libc::{getrusage, rusage, RUSAGE_SELF};
+
+const TIMES: usize = 1;
+
 fn main() {
-    for name in env::args().skip(1) {
-        eprintln!("* {} *", name);
-        let text = fs::read(&name).unwrap();
-        eprintln!("load: {} bytes", text.len());
-        let mut suf = vec![0; text.len()];
-        let ((), dur) = timeit(|| sacak::sacak(&text[..], &mut suf[..]));
-        eprintln!("saca-k: runs in {:.3}s", dur.as_secs_f64());
-        eprintln!("validate: {}", validate(&text[..], &suf[..]));
-        eprintln!("");
+    let text;
+    if let Some(name) = env::args().skip(1).next() {
+        text = fs::read(&name).unwrap();
+        eprintln!("load {} bytes from `{}`", text.len(), &name);
+    } else {
+        eprintln!("error: require a input file");
+        process::exit(1);
     }
+
+    eprint!(" time: ");
+    let mut suf = vec![0; text.len()];
+    for _ in 0..TIMES {
+        let ((), dur) = timeit(|| sacak::sacak(&text[..], &mut suf[..]));
+        eprint!("{:.3}s ", dur.as_secs_f64());
+    }
+    eprintln!("");
+
+    eprintln!("  rss: {:.3}MiB", peak_rss_kib() as f64 / 1024.0);
+    eprintln!("check: {}", validate(&text[..], &suf[..]));
+}
+
+fn peak_rss_kib() -> u64 {
+    let mut ru;
+    unsafe {
+        ru = mem::zeroed::<rusage>();
+        getrusage(RUSAGE_SELF, &mut ru as *mut rusage);
+    }
+    ru.ru_maxrss as u64
 }
 
 fn timeit<F, T>(f: F) -> (T, time::Duration)
