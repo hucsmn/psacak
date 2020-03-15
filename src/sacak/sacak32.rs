@@ -164,6 +164,7 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
         if suf[i] > 0 && suf[i] < EMPTY {
             // text[suf[i]] is non-empty, and has preceding character.
             let j = (suf[i] - 1).as_index();
+            let clean = is_schar(text, suf[i].as_index()); // we need manually clean up lms.
             if text[j] >= text[j + 1] {
                 // preceding character text[j] is l-type.
                 let p = text[j].as_index();
@@ -200,9 +201,8 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
                     }
                 }
 
-                if left_most || is_schar(text, suf[i].as_index()) {
-                    // clean up lms-characters.
-                    // when left_most is toggled, leave lml-characters only.
+                if left_most || clean {
+                    // leave lml-characters only if left_most is toggled.
                     suf[i] = EMPTY;
                 }
             }

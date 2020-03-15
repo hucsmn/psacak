@@ -1,5 +1,31 @@
 use super::types::*;
-use std::cmp::Ordering;
+
+#[macro_export]
+macro_rules! inspect_here {
+    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect($text, $suf, &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect($text, &[], &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );* => suf: $suf:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect(b"", $suf, &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+        }
+    };
+}
 
 /// Naive suffix array construction that sorts tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
@@ -124,80 +150,74 @@ where
     });
 }
 
-/// Specialized lml-characters enumerator, in reversed order.
+/// Specialized rml-characters enumerator, in reversed order.
 #[inline]
-pub fn foreach_lmlchars<C, F>(text: &[C], mut f: F)
+pub fn foreach_rmlchars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
     F: FnMut(usize, C),
 {
+    if text.len() > 0 {
+        f(text.len() - 1, text[text.len() - 1])
+    }
+
+    let mut prev_lms = false;
     foreach_typedchars(text, |i, t, c| {
-        if t.is_lml() {
-            f(i, c)
+        if t.is_lms() {
+            prev_lms = true;
+        } else if prev_lms {
+            f(i, c);
+            prev_lms = false;
+        } else {
+            prev_lms = false;
         }
     });
 }
 
-/// Comapre two lms-substrings of known lengths.
+/// Test if two lms-substrings of known fingerprint are equal.
 #[inline]
-pub fn lmssubs_compare<C: SacaChar>(
-    text: &[C],
-    i: usize,
-    m: usize,
-    j: usize,
-    n: usize,
-) -> Ordering {
-    let p = i + m;
-    let q = j + n;
+fn lmssubs_equalfp<C: SacaChar>(text: &[C], i: usize, fpi: u128, j: usize, fpj: u128) -> bool {
     if i == j {
-        debug_assert!(p == q && p <= text.len() + 1);
-        return Ordering::Equal;
+        return true;
     }
 
-    if p <= text.len() && q <= text.len() {
-        Ord::cmp(&text[i..p], &text[j..q])
-    } else if p > text.len() {
-        debug_assert!(q <= text.len() && p == text.len() + 1);
-        let order = Ord::cmp(&text[i..], &text[j..q]);
-        if order != Ordering::Equal {
-            order
-        } else {
-            Ordering::Less
-        }
-    } else {
-        debug_assert!(p <= text.len() && q == text.len() + 1);
-        let order = Ord::cmp(&text[i..p], &text[j..]);
-        if order != Ordering::Equal {
-            order
-        } else {
-            Ordering::Greater
-        }
+    if fpi != fpj {
+        return false;
     }
+
+    let fptype = (fpi >> 120) as u8;
+    if fptype < 0x80 {
+        return true;
+    }
+
+    let width = fptype - 0x80;
+    let fpvalue = (fpi & ((1 << 120) - 1));
+    let n = (fpvalue >> (120 - width)) as usize;
+    let m = ((120 - width) / C::BIT_WIDTH) as usize;
+    lmssubs_equal(text, i + m, j + m, n - m)
 }
 
 /// Test if two lms-substrings of known length are equal.
 #[inline]
-pub fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, j: usize, n: usize) -> bool {
+fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, j: usize, n: usize) -> bool {
     let p = i + n;
     let q = j + n;
     if i == j {
-        debug_assert!(p <= text.len() + 1);
+        return true;
     }
 
     if p <= text.len() && q <= text.len() {
         &text[i..p] == &text[j..q]
     } else if p > text.len() {
-        debug_assert!(q <= text.len() && p == text.len() + 1);
         false
     } else {
-        debug_assert!(p <= text.len() && q == text.len() + 1);
         false
     }
 }
 
 /// Calculate the length of lms-substring (probably contains sentinel).
 #[inline]
-pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
+fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     if i == text.len() {
         return 1;
     }
@@ -227,6 +247,114 @@ pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     n
 }
 
+/// Calculate the fingerprint of lms-substring (probably contains sentinel).
+///
+/// The MSB is the fingerprint type:
+///     0x00-0x1f: following a short string (length is type),
+///     0x20-0x30: following a sentinel terminated short string (length is `type - 0x10`, include sentinel),
+///     0x80-0xff: following the length (bit width is `type - 0x80`), and a short prefix of the lms-substring,
+///
+/// Therefore, `fp0 == fp1 && fp_type < 0x80 && lmssubs_equal(text, i0, i1, fp_len)`
+/// is equivalent to `the two lms-substrings are equal`.
+#[inline]
+fn lmssubs_getfp<C, I>(text: &[C], i: usize) -> u128
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    if i == text.len() {
+        return 0x21 << 120;
+    }
+
+    let mut n = 1;
+    let mut fp = text[i].as_u64() as u128;
+    let mut sentinel = false;
+
+    // upslope and plateau.
+    while i + n < text.len() && text[i + n] >= text[i + n - 1] {
+        if n <= 15 / C::SIZE {
+            fp <<= C::BIT_WIDTH;
+            fp |= text[i + n].as_u64() as u128;
+        }
+        n += 1;
+    }
+
+    // downslope and valley.
+    while i + n < text.len() && text[i + n] <= text[i + n - 1] {
+        if n <= 15 / C::SIZE {
+            fp <<= C::BIT_WIDTH;
+            fp |= text[i + n].as_u64() as u128;
+        }
+        n += 1;
+    }
+
+    if i + n == text.len() {
+        // include sentinel.
+        n += 1;
+        sentinel = true;
+    } else {
+        // exclude trailing part of valley.
+        while n > 0 && text[i + n - 1] == text[i + n - 2] {
+            if n <= 15 / C::SIZE {
+                fp >>= C::BIT_WIDTH;
+            }
+            n -= 1;
+        }
+    }
+
+    // pack fingerprint.
+    if sentinel && n <= 15 / C::SIZE + 1 {
+        fp |= ((0x20 + n) as u128) << 120;
+    } else if n > 15 / C::SIZE {
+        fp >>= (15 / C::SIZE - (15 - I::SIZE) / C::SIZE) as u8 * C::BIT_WIDTH;
+        fp |= (n as u128) << (120 - I::BIT_WIDTH);
+        fp |= ((0x80 + I::BIT_WIDTH) as u128) << 120;
+    } else {
+        fp |= (n as u128) << 120;
+    }
+    fp
+}
+
+/// Debug only utility to show lms-substring fingerprint.
+fn fmtfp<C: SacaChar>(fp: u128) -> String {
+    let fptype = (fp >> 120) as u8;
+    let fpvalue = (fp & ((1 << 120) - 1));
+    if fptype < 0x20 {
+        let n = fptype as usize;
+        let mut x = fp & ((1 << 120) - 1);
+        let mut s = vec![C::ZERO; n];
+        for i in (0..n).rev() {
+            s[i] = C::from_u64(x as u64);
+            x >>= C::BIT_WIDTH;
+        }
+        format!("{:02x}:{:030x} <short {}+{:?}>", fptype, fpvalue, n, s)
+    } else if fptype < 0x80 {
+        let n = (fptype - 0x20) as usize;
+        let mut x = fpvalue;
+        let mut s = vec![C::ZERO; n - 1];
+        for i in (0..n - 1).rev() {
+            s[i] = C::from_u64(x as u64);
+            x >>= C::BIT_WIDTH;
+        }
+        format!("{:02x}:{:030x} <short {}+{:?}$>", fptype, fpvalue, n, s)
+    } else {
+        let w = (fptype - 0x80) as u8;
+        let n = (fpvalue >> (120 - w)) as usize;
+        let m = ((120 - w) / C::BIT_WIDTH) as usize;
+        let pre = fpvalue & ((1 << (120 - w)) - 1);
+        let mut x = pre;
+        let mut s = vec![C::ZERO; m];
+        for i in (0..m).rev() {
+            s[i] = C::from_u64(x as u64);
+            x >>= C::BIT_WIDTH;
+        }
+        format!(
+            "{:02x}:{:08x}:{:022x} <long {}+{:?}+@{}...>",
+            fptype, n, pre, n, s, m
+        )
+    }
+}
+
 /// Get ranks of the sorted lms-substrings in the head, to the tail of workspace.
 pub fn rank_sorted_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
@@ -237,21 +365,26 @@ where
         return 0;
     }
 
+    //inspect_here!("rank_sorted_lmssubs" => text: text, suf: suf);
+
     // insert ranks of lms-substrings by their occurrence order in text.
     let mut k = 1;
-    let mut dy = lmssubs_getlen(text, suf[0].as_index());
+    let mut fp0 = lmssubs_getfp::<C, I>(text, suf[0].as_index());
+    //eprintln!("  fp[{:02}]: {}", suf[0], fmtfp::<C>(fp0));
     let (lmssubs, work) = suf.split_at_mut(n);
     work.iter_mut().for_each(|p| *p = I::MAX);
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     for i in 1..n {
-        let x = lmssubs[i].as_index();
-        let y = lmssubs[i - 1].as_index();
-        let dx = lmssubs_getlen(text, x);
-        if dx != dy || !lmssubs_equal(text, x, y, dx) {
+        let x1 = lmssubs[i].as_index();
+        let x0 = lmssubs[i - 1].as_index();
+        let fp1 = lmssubs_getfp::<C, I>(text, x1);
+        //eprintln!("  fp[{:02}]: {}", x1, fmtfp::<C>(fp1));
+        if !lmssubs_equalfp(text, x0, fp0, x1, fp1) {
+            //eprintln!("    -> not equal");
             k += 1;
         }
-        work[x / 2] = I::from_index(k - 1);
-        dy = dx;
+        work[x1 / 2] = I::from_index(k - 1);
+        fp0 = fp1;
     }
 
     // compact ranks to the tail if needed.
@@ -264,12 +397,17 @@ where
             }
         }
     }
+    //inspect_here!("done" => text: text, suf: suf);
     k
 }
 
 /// Debug inspector.
 #[allow(unused)]
-pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
+pub fn inspect<C, I>(text: &[C], suf: &[I], cursors: &[usize])
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
     use term_table::row::Row;
     use term_table::table_cell::{Alignment, TableCell};
     use term_table::{Table, TableStyle};
@@ -312,11 +450,9 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
         foreach_typedchars(text, |i, t, _| {
             if t.is_lms() {
                 lms[i] = "*"
-            } else if t.is_lml() {
-                lms[i] = "+"
             }
         });
-        let mut lms_row = vec![TableCell::new("lms/lml")];
+        let mut lms_row = vec![TableCell::new("lms")];
         lms.iter()
             .for_each(|&s| lms_row.push(TableCell::new_with_alignment(s, 1, align)));
         table.add_row(Row::new(lms_row));
@@ -327,12 +463,15 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
 
         // workspace.
         let mut suf_row = vec![TableCell::new("suf")];
+        let empty = I::ONE << (I::BIT_WIDTH - 1);
         suf.iter().for_each(|&i| {
             let val;
-            if i == 1 << 31 {
+            if i == empty {
                 val = String::from("E");
+            } else if i > empty {
+                val = format!("-{}", I::ONE + !i);
             } else {
-                val = format!("{}", i as i32);
+                val = format!("{}", i);
             }
             suf_row.push(TableCell::new_with_alignment(val, 1, align))
         });
@@ -379,31 +518,4 @@ pub fn inspect<C: SacaChar>(text: &[C], suf: &[u32], cursors: &[usize]) {
     }
 
     eprintln!("{}", table.render());
-}
-
-#[macro_export]
-macro_rules! inspect_here {
-    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-            inspect($text, $suf, &[$($ptr ,)*]);
-        }
-    };
-    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr $(, $ptr:expr)*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-            inspect($text, &[], &[$($ptr ,)*]);
-        }
-    };
-    ($( $fmt:expr $( , $args:expr )* );* => suf: $suf:expr $(, $ptr:expr)*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-            inspect(b"", $suf, &[$($ptr ,)*]);
-        }
-    };
-    ($( $fmt:expr $( , $args:expr )* );*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-        }
-    };
 }

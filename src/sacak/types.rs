@@ -37,6 +37,7 @@ pub trait Uint:
     const BIT_WIDTH: u8;
 
     fn from_u64(x: u64) -> Self;
+    fn as_u64(self) -> u64;
 
     fn wrapping_add(self, other: Self) -> Self;
     fn saturating_add(self, other: Self) -> Self;
@@ -71,6 +72,11 @@ macro_rules! impl_uint {
                 #[inline(always)]
                 fn from_u64(x: u64) -> Self {
                     x as $uint
+                }
+
+                #[inline(always)]
+                fn as_u64(self) -> u64 {
+                    self as u64
                 }
 
                 forward_binops_for_impl_uint! { $uint =>

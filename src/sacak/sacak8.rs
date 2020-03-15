@@ -107,9 +107,8 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
                 // preceding character is l-type.
                 suf[p.as_index()] = u32::from_index(j);
                 *p += 1;
-                if left_most || is_schar(text, suf[i].as_index()) {
-                    // clean up lms-characters.
-                    // when left_most is toggled, leave lml-type characters only.
+                if left_most {
+                    // clean up non left most l-type characters.
                     suf[i] = 0;
                 }
             }
@@ -163,16 +162,12 @@ impl Buckets {
 
     #[inline]
     pub fn set_head(&mut self) {
-        for i in 0..256 {
-            self.ptrs[i] = self.cache[i]
-        }
+        self.ptrs.copy_from_slice(&self.cache[..256])
     }
 
     #[inline]
     pub fn set_tail(&mut self) {
-        for i in 0..256 {
-            self.ptrs[i] = self.cache[i + 1]
-        }
+        self.ptrs.copy_from_slice(&self.cache[1..257])
     }
 }
 
