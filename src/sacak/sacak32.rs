@@ -4,9 +4,6 @@ use super::types::*;
 /// Empty mark in the workspace.
 const EMPTY: u32 = 1 << 31;
 
-/// Sort lms-substrings by inducing.
-const LMS_INDUCE: bool = true;
-
 /// Sort suffix array for integer string (alphabet size k).
 pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     let suf = &mut suf[..text.len()];
@@ -19,29 +16,22 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     // make bucket pointers by rewriting text.
     transform_text(text, suf, k);
 
-    // sort lms-substrings.
-    let mut n; // count of lms-suffixes.
-    let mut k; // alphabet size of the subproblem.
-    if LMS_INDUCE {
-        // induce sort lms-substrings.
-        put_lmschars(text, suf);
-        induce_lchars(text, suf, true);
-        induce_schars(text, suf, true);
+    // induce sort lms-substrings.
+    put_lmschars(text, suf);
+    induce_lchars(text, suf, true);
+    induce_schars(text, suf, true);
 
-        // collect sorted lms-substrings into the head of workspace.
-        n = 0;
-        for i in 0..suf.len() {
-            if suf[i] < EMPTY {
-                suf[n] = suf[i];
-                n += 1;
-            }
+    // collect sorted lms-substrings into the head of workspace.
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] < EMPTY {
+            suf[n] = suf[i];
+            n += 1;
         }
-
-        // get ranks of lms-substrings into the tail of workspace.
-        k = rank_sorted_lmssubs(text, suf, n);
-    } else {
-        unimplemented!();
     }
+
+    // get ranks of lms-substrings into the tail of workspace.
+    let k = rank_sorted_lmssubs(text, suf, n);
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings
