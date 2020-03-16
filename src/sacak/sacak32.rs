@@ -31,7 +31,11 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     }
 
     // get ranks of lms-substrings into the tail of workspace.
-    let k = rank_sorted_lmssubs(text, suf, n);
+    let k = if LMS_FINGERPRINT {
+        rank_sorted_lmssubs(text, suf, n, lmssubs_getfp::<u32, u128>, lmssubs_equalfp::<u32, u128>)
+    } else {
+        rank_sorted_lmssubs(text, suf, n, lmssubs_getlen, lmssubs_equal)
+    };
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings
@@ -331,9 +335,9 @@ mod tests {
             &[2, 2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 1],
             &[6, 8, 9, 5, 2, 4, 3, 0, 0, 7, 1, 2],
             &[
-                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0,
-                2, 1, 2, 1, 1, 0, 2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2,
-                2, 2, 1, 1, 1, 1, 2, 0, 2, 1, 1, 1, 2, 1, 0, 1,
+                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0, 2, 1, 2, 1, 1, 0,
+                2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2, 2, 2, 1, 1, 1, 1, 2, 0, 2, 1, 1, 1,
+                2, 1, 0, 1,
             ],
         ];
 
@@ -372,9 +376,6 @@ mod tests {
             *v = k;
             k += 1;
         }
-        (
-            text.iter().map(|c| *dic.get(c).unwrap() as u32).collect(),
-            k,
-        )
+        (text.iter().map(|c| *dic.get(c).unwrap() as u32).collect(), k)
     }
 }

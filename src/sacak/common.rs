@@ -1,5 +1,8 @@
 use super::types::*;
 
+/// Switch: lms substring compare by fingerprint.
+pub const LMS_FINGERPRINT: bool = true;
+
 #[macro_export]
 macro_rules! inspect_here {
     ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
@@ -174,50 +177,9 @@ where
     });
 }
 
-/// Test if two lms-substrings of known fingerprint are equal.
-#[inline]
-fn lmssubs_equalfp<C: SacaChar>(text: &[C], i: usize, fpi: u128, j: usize, fpj: u128) -> bool {
-    if i == j {
-        return true;
-    }
-
-    if fpi != fpj {
-        return false;
-    }
-
-    let fptype = (fpi >> 120) as u8;
-    if fptype < 0x80 {
-        return true;
-    }
-
-    let width = fptype - 0x80;
-    let fpvalue = (fpi & ((1 << 120) - 1));
-    let n = (fpvalue >> (120 - width)) as usize;
-    let m = ((120 - width) / C::BIT_WIDTH) as usize;
-    lmssubs_equal(text, i + m, j + m, n - m)
-}
-
-/// Test if two lms-substrings of known length are equal.
-#[inline]
-fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, j: usize, n: usize) -> bool {
-    let p = i + n;
-    let q = j + n;
-    if i == j {
-        return true;
-    }
-
-    if p <= text.len() && q <= text.len() {
-        &text[i..p] == &text[j..q]
-    } else if p > text.len() {
-        false
-    } else {
-        false
-    }
-}
-
 /// Calculate the length of lms-substring (probably contains sentinel).
 #[inline]
-fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
+pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     if i == text.len() {
         return 1;
     }
@@ -239,7 +201,7 @@ fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
         return n + 1;
     }
 
-    // exclude trailing part of valley.
+    // exclude the trailing part of valley.
     while n > 0 && text[i + n - 1] == text[i + n - 2] {
         n -= 1;
     }
@@ -247,140 +209,135 @@ fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     n
 }
 
-/// Calculate the fingerprint of lms-substring (probably contains sentinel).
-///
-/// The MSB is the fingerprint type:
-///     0x00-0x1f: following a short string (length is type),
-///     0x20-0x30: following a sentinel terminated short string (length is `type - 0x10`, include sentinel),
-///     0x80-0xff: following the length (bit width is `type - 0x80`), and a short prefix of the lms-substring,
-///
-/// Therefore, `fp0 == fp1 && fp_type < 0x80 && lmssubs_equal(text, i0, i1, fp_len)`
-/// is equivalent to `the two lms-substrings are equal`.
+/// Test if two lms-substrings of known length are equal.
 #[inline]
-fn lmssubs_getfp<C, I>(text: &[C], i: usize) -> u128
+pub fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, m: usize, j: usize, n: usize) -> bool {
+    let p = i + m;
+    let q = j + n;
+    if i == j {
+        return true;
+    }
+    if m != n || p > text.len() || q > text.len() {
+        return false;
+    }
+
+    &text[i..p] == &text[j..q]
+}
+
+/// Finger print of lms-substring.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct FingerPrint<X: Uint> {
+    // length including sentinel.
+    len: usize,
+    // prefix of the lms-substring.
+    fp: X,
+}
+
+impl<X: Uint> FingerPrint<X> {
+    fn new(len: usize, fp: X) -> Self {
+        FingerPrint { len, fp }
+    }
+}
+
+/// Calculate the fingerprint of lms-substring.
+#[inline]
+pub fn lmssubs_getfp<C, X>(text: &[C], i: usize) -> FingerPrint<X>
 where
-    C: SacaChar,
-    I: SacaIndex,
+    C: SacaChar + As<X>,
+    X: Uint,
 {
     if i == text.len() {
-        return 0x21 << 120;
+        return FingerPrint::new(1, C::MAX.r#as());
     }
 
     let mut n = 1;
-    let mut fp = text[i].as_u64() as u128;
-    let mut sentinel = false;
+    let mut fp = text[i].r#as();
 
     // upslope and plateau.
     while i + n < text.len() && text[i + n] >= text[i + n - 1] {
-        if n <= 15 / C::SIZE {
+        if n < X::SIZE / C::SIZE {
             fp <<= C::BIT_WIDTH;
-            fp |= text[i + n].as_u64() as u128;
+            fp |= text[i + n].r#as();
         }
         n += 1;
     }
 
     // downslope and valley.
     while i + n < text.len() && text[i + n] <= text[i + n - 1] {
-        if n <= 15 / C::SIZE {
+        if n < X::SIZE / C::SIZE {
             fp <<= C::BIT_WIDTH;
-            fp |= text[i + n].as_u64() as u128;
+            fp |= text[i + n].r#as();
         }
         n += 1;
     }
 
+    // include sentinel.
     if i + n == text.len() {
-        // include sentinel.
         n += 1;
-        sentinel = true;
+        if n < X::SIZE / C::SIZE {
+            fp <<= C::BIT_WIDTH;
+            fp |= C::MAX.r#as(); // C::MAX cannot be s-type.
+        }
     } else {
-        // exclude trailing part of valley.
+        // exclude the trailing part of valley.
         while n > 0 && text[i + n - 1] == text[i + n - 2] {
-            if n <= 15 / C::SIZE {
+            n -= 1;
+            if n < X::SIZE / C::SIZE {
                 fp >>= C::BIT_WIDTH;
             }
-            n -= 1;
         }
     }
 
-    // pack fingerprint.
-    if sentinel && n <= 15 / C::SIZE + 1 {
-        fp |= ((0x20 + n) as u128) << 120;
-    } else if n > 15 / C::SIZE {
-        fp >>= (15 / C::SIZE - (15 - I::SIZE) / C::SIZE) as u8 * C::BIT_WIDTH;
-        fp |= (n as u128) << (120 - I::BIT_WIDTH);
-        fp |= ((0x80 + I::BIT_WIDTH) as u128) << 120;
-    } else {
-        fp |= (n as u128) << 120;
-    }
-    fp
+    FingerPrint::new(n, fp)
 }
 
-/// Debug only utility to show lms-substring fingerprint.
-fn fmtfp<C: SacaChar>(fp: u128) -> String {
-    let fptype = (fp >> 120) as u8;
-    let fpvalue = (fp & ((1 << 120) - 1));
-    if fptype < 0x20 {
-        let n = fptype as usize;
-        let mut x = fp & ((1 << 120) - 1);
-        let mut s = vec![C::ZERO; n];
-        for i in (0..n).rev() {
-            s[i] = C::from_u64(x as u64);
-            x >>= C::BIT_WIDTH;
-        }
-        format!("{:02x}:{:030x} <short {}+{:?}>", fptype, fpvalue, n, s)
-    } else if fptype < 0x80 {
-        let n = (fptype - 0x20) as usize;
-        let mut x = fpvalue;
-        let mut s = vec![C::ZERO; n - 1];
-        for i in (0..n - 1).rev() {
-            s[i] = C::from_u64(x as u64);
-            x >>= C::BIT_WIDTH;
-        }
-        format!("{:02x}:{:030x} <short {}+{:?}$>", fptype, fpvalue, n, s)
-    } else {
-        let w = (fptype - 0x80) as u8;
-        let n = (fpvalue >> (120 - w)) as usize;
-        let m = ((120 - w) / C::BIT_WIDTH) as usize;
-        let pre = fpvalue & ((1 << (120 - w)) - 1);
-        let mut x = pre;
-        let mut s = vec![C::ZERO; m];
-        for i in (0..m).rev() {
-            s[i] = C::from_u64(x as u64);
-            x >>= C::BIT_WIDTH;
-        }
-        format!(
-            "{:02x}:{:08x}:{:022x} <long {}+{:?}+@{}...>",
-            fptype, n, pre, n, s, m
-        )
+/// Test if two lms-substrings of known fingerprints are equal.
+pub fn lmssubs_equalfp<C, X>(text: &[C], mut i: usize, fpi: FingerPrint<X>, mut j: usize, fpj: FingerPrint<X>) -> bool
+where
+    C: SacaChar + As<X>,
+    X: Uint,
+{
+    if i == j {
+        return true;
     }
+    let p = i + fpi.len;
+    let q = j + fpj.len;
+    if fpi != fpj || p > text.len() || q > text.len() {
+        return false;
+    }
+
+    if fpi.len <= X::SIZE / C::SIZE {
+        return true;
+    }
+    i += X::SIZE / C::SIZE;
+    j += X::SIZE / C::SIZE;
+    &text[i..p] == &text[j..q]
 }
 
 /// Get ranks of the sorted lms-substrings in the head, to the tail of workspace.
-pub fn rank_sorted_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
+pub fn rank_sorted_lmssubs<C, I, FP, GET, CMP>(text: &[C], suf: &mut [I], n: usize, getfp: GET, cmpfp: CMP) -> usize
 where
     C: SacaChar,
     I: SacaIndex,
+    FP: Copy + Eq,
+    GET: Fn(&[C], usize) -> FP,
+    CMP: Fn(&[C], usize, FP, usize, FP) -> bool,
 {
     if n == 0 {
         return 0;
     }
 
-    //inspect_here!("rank_sorted_lmssubs" => text: text, suf: suf);
-
     // insert ranks of lms-substrings by their occurrence order in text.
     let mut k = 1;
-    let mut fp0 = lmssubs_getfp::<C, I>(text, suf[0].as_index());
-    //eprintln!("  fp[{:02}]: {}", suf[0], fmtfp::<C>(fp0));
+    let mut fp0 = getfp(text, suf[0].as_index());
     let (lmssubs, work) = suf.split_at_mut(n);
     work.iter_mut().for_each(|p| *p = I::MAX);
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     for i in 1..n {
         let x1 = lmssubs[i].as_index();
         let x0 = lmssubs[i - 1].as_index();
-        let fp1 = lmssubs_getfp::<C, I>(text, x1);
-        //eprintln!("  fp[{:02}]: {}", x1, fmtfp::<C>(fp1));
-        if !lmssubs_equalfp(text, x0, fp0, x1, fp1) {
-            //eprintln!("    -> not equal");
+        let fp1 = getfp(text, x1);
+        if !cmpfp(text, x0, fp0, x1, fp1) {
             k += 1;
         }
         work[x1 / 2] = I::from_index(k - 1);
@@ -397,7 +354,6 @@ where
             }
         }
     }
-    //inspect_here!("done" => text: text, suf: suf);
     k
 }
 
