@@ -16,18 +16,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort lms-substrings.
     let mut bkt = Buckets::new(text);
-    put_lmschars(text, suf, &mut bkt);
-    induce_lchars(text, suf, &mut bkt, true);
-    induce_schars(text, suf, &mut bkt, true);
-
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] > 0 {
-            suf[n] = suf[i];
-            n += 1;
-        }
-    }
+    let n = sort_lmssubs(text, suf, &mut bkt);
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = if LMS_FINGERPRINT {
@@ -63,7 +52,42 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     induce_schars(text, suf, &mut bkt, false);
 }
 
-/// Put lms-characters.
+/// Debug only.
+#[cfg(test)]
+pub fn get_sorted_lmssubs(text: &[u8]) -> Vec<u32> {
+    if text.len() <= 3 {
+        let mut ret = Vec::new();
+        foreach_lmschars(text, |i, _| ret.push(i as u32));
+        return ret;
+    }
+
+    let mut suf = vec![0; text.len()];
+    let mut bkt = Buckets::new(text);
+    let n = sort_lmssubs(text, &mut suf[..], &mut bkt);
+    suf.truncate(n);
+    suf.shrink_to_fit();
+    suf
+}
+
+/// Induce sort all the lms-substrings into the head of workspace.
+fn sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> usize {
+    // induce sort lms-substrings from lms-characters.
+    put_lmschars(text, suf, bkt);
+    induce_lchars(text, suf, bkt, true);
+    induce_schars(text, suf, bkt, true);
+
+    // collect sorted lms-substrings into the head of workspace.
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] > 0 {
+            suf[n] = suf[i];
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Put lms-characters in arbitary order.
 #[inline]
 fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.set_tail();
@@ -132,6 +156,7 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             let p = &mut bkt[text[j]];
             if text[j] <= text[j + 1] && p.as_index() <= i {
                 // preceding character is s-type.
+                eprintln!("   suf[{}]: {} -> suf[{}]", i, j, *p);
                 *p -= 1;
                 suf[p.as_index()] = u32::from_index(j);
                 if left_most {
@@ -166,12 +191,12 @@ impl Buckets {
 
     #[inline]
     pub fn set_head(&mut self) {
-        self.ptrs.copy_from_slice(&self.cache[..256])
+        self.ptrs.copy_from_slice(&self.cache[..256]);
     }
 
     #[inline]
     pub fn set_tail(&mut self) {
-        self.ptrs.copy_from_slice(&self.cache[1..257])
+        self.ptrs.copy_from_slice(&self.cache[1..257]);
     }
 }
 

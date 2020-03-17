@@ -17,18 +17,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     transform_text(text, suf, k);
 
     // induce sort lms-substrings.
-    put_lmschars(text, suf);
-    induce_lchars(text, suf, true);
-    induce_schars(text, suf, true);
-
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] < EMPTY {
-            suf[n] = suf[i];
-            n += 1;
-        }
-    }
+    let n = sort_lmssubs(text, suf);
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = if LMS_FINGERPRINT {
@@ -84,6 +73,24 @@ fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
             *p = suf[c] - 1;
         }
     })
+}
+
+/// Induce sort all the lms-substrings into the head of workspace.
+fn sort_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
+    // induce sort lms-substrings.
+    put_lmschars(text, suf);
+    induce_lchars(text, suf, true);
+    induce_schars(text, suf, true);
+
+    // collect sorted lms-substrings into the head of workspace.
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] < EMPTY {
+            suf[n] = suf[i];
+            n += 1;
+        }
+    }
+    n
 }
 
 /// Put lms-characters.

@@ -153,30 +153,6 @@ where
     });
 }
 
-/// Specialized rml-characters enumerator, in reversed order.
-#[inline]
-pub fn foreach_rmlchars<C, F>(text: &[C], mut f: F)
-where
-    C: SacaChar,
-    F: FnMut(usize, C),
-{
-    if text.len() > 0 {
-        f(text.len() - 1, text[text.len() - 1])
-    }
-
-    let mut prev_lms = false;
-    foreach_typedchars(text, |i, t, c| {
-        if t.is_lms() {
-            prev_lms = true;
-        } else if prev_lms {
-            f(i, c);
-            prev_lms = false;
-        } else {
-            prev_lms = false;
-        }
-    });
-}
-
 /// Calculate the length of lms-substring (probably contains sentinel).
 #[inline]
 pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
@@ -380,6 +356,7 @@ where
 
     // indeices.
     let n = Ord::max(text.len(), suf.len());
+    let k = text.iter().map(|&c| c.as_index()).max().unwrap_or(0) + 1;
     let mut num_row = vec![TableCell::new("")];
     (0..n).for_each(|i| num_row.push(TableCell::new_with_alignment(format!("[{}]", i), 1, align)));
     table.add_row(Row::new(num_row));
@@ -436,7 +413,7 @@ where
         if text.len() == text.len() {
             // bucket indicators.
             let mut bkt = vec![String::new(); n];
-            let mut bkt_head = vec![0; n + 1];
+            let mut bkt_head = vec![0; k + 1];
             text.iter().for_each(|&c| bkt_head[c.as_index() + 1] += 1);
             bkt_head[1..].iter_mut().fold(0, |sum, p| {
                 *p += sum;

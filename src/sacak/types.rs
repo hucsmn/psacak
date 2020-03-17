@@ -104,6 +104,7 @@ macro_rules! impl_uint {
 
                 type NonZero = $nonzero;
 
+                #[inline(always)]
                 fn into_nonzero(self) -> Option<Self::NonZero> {
                     Self::NonZero::new(self)
                 }
