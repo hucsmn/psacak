@@ -5,6 +5,7 @@ use super::ranking::rank_lmssubs;
 use super::sacak32::sacak32;
 use super::types::*;
 
+/// Threshold to disable fast induce sort.
 const FAST_INDUCE_SIZE: usize = !(1u32 << 31) as usize;
 
 /// Sort suffix array for byte string.
