@@ -5,6 +5,7 @@ use super::types::*;
 const EMPTY: u32 = 1 << 31;
 
 /// Sort suffix array for integer string (alphabet size k).
+#[inline]
 pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     let suf = &mut suf[..text.len()];
 
@@ -14,7 +15,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     }
 
     // make bucket pointers by rewriting text.
-    transform_text(text, suf, k);
+    translate_text(text, suf, k);
 
     // induce sort lms-substrings.
     let n = sort_lmssubs(text, suf);
@@ -53,10 +54,11 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     induce_schars(text, suf, false);
 }
 
-/// Map integer characters to bucket pointers, keeping character types unchanged.
-#[inline(never)]
-fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
-    // make bucket.
+/// Translate characters to their corresponding bucket pointers.
+/// The lexicographical order would be unchanged.
+#[inline]
+fn translate_text(text: &mut [u32], suf: &mut [u32], k: usize) {
+    // calculate bucket pointers.
     suf[..k].iter_mut().for_each(|p| *p = 0);
     text.iter().for_each(|&c| suf[c.as_index()] += 1);
     suf[..k].iter_mut().fold(0, |sum, p| {
@@ -64,12 +66,14 @@ fn transform_text(text: &mut [u32], suf: &mut [u32], k: usize) {
         *p
     });
 
-    // l-type => bucket_head, s-type => bucket_tail - 1.
+    // translate characters to bucket pointers.
     foreach_typedchars_mut(text, |i, t, p| {
         let c = p.as_index();
         if !t.stype {
+            // l-type => bucket head.
             *p = if c > 0 { suf[c - 1] } else { 0 };
         } else {
+            // s-type => bucket tail - 1.
             *p = suf[c] - 1;
         }
     })
@@ -93,8 +97,8 @@ fn sort_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
     n
 }
 
-/// Put lms-characters.
-#[inline(never)]
+/// Put lms-characters to their corresponding bucket tails, in arbitary order.
+#[inline]
 fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     suf.iter_mut().for_each(|p| *p = EMPTY);
 
@@ -136,8 +140,9 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     }
 }
 
-/// Put the sorted lms-suffixes in head of workspace to the right place.
-#[inline(never)]
+/// Put the sorted lms-suffixes, originally located in the head of workspace,
+/// to their corresponding bucket tails.
+#[inline]
 fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     suf[n..].iter_mut().for_each(|p| *p = EMPTY);
 
@@ -158,10 +163,15 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     }
 }
 
-/// Induce (left most) l-typed characters from left most s-type characters.
-#[inline(never)]
+/// Induce l-suffixes (or lml-suffixes) from sorted lms-suffixes.
+/// 
+/// Assumes that non lms-suffixes among the input `suf` have been reset as `EMPTY`.
+/// 
+/// Outputs the induced l-suffixes with the input lms-suffixes reset to `EMPTY`,
+/// or the induced lml-suffixes with all other suffixes reset to `EMPTY`.
+#[inline]
 fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
-    // sentinel.
+    // the sentinel.
     let p = text[text.len() - 1].as_index();
     if p + 1 < suf.len() && suf[p + 1] == EMPTY {
         suf[p] = from_counter(1);
@@ -173,11 +183,11 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = 0;
     while i < suf.len() {
         if suf[i] > 0 && suf[i] < EMPTY {
-            // text[suf[i]] is non-empty, and has preceding character.
+            // text[suf[i]] is non-empty, and has a preceding character.
             let j = (suf[i] - 1).as_index();
             let clean = is_schar(text, suf[i].as_index()); // we need manually clean up lms.
             if text[j] >= text[j + 1] {
-                // preceding character text[j] is l-type.
+                // the preceding character is l-type.
                 let p = text[j].as_index();
                 if suf[p] < EMPTY {
                     // left shift the borrowed chunk.
@@ -213,7 +223,7 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
                 }
 
                 if left_most || clean {
-                    // leave lml-characters only if left_most is toggled.
+                    // only keep lml-suffixes if toggled left_most.
                     suf[i] = EMPTY;
                 }
             }
@@ -221,7 +231,7 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
         i += 1;
     }
 
-    // clean up counters.
+    // clean up bucket counters.
     for i in 0..suf.len() {
         if suf[i] > EMPTY {
             let n = as_counter(suf[i]);
@@ -230,21 +240,27 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
         }
     }
     if left_most {
-        // text[0] is not lml-character.
+        // text[0..] is not a lml-suffix.
         suf.iter_mut().filter(|p| **p == 0).for_each(|p| *p = EMPTY);
     }
 }
 
-/// Induce (left most) s-typed characters from (left most) l-type characters.
-#[inline(never)]
+/// Induce s-suffixes (or lms-suffixes) from sorted l-suffixes (or lml-suffixes).
+/// 
+/// Assumes that non l-suffixes (or non lml-suffixes) among the input `suf`
+/// have been reset as `EMPTY`.
+/// 
+/// Outputs the induced s-suffixes together with the input l-suffixes,
+/// or the induced lms-suffixes with all other suffixes reset to `EMPTY`.
+#[inline]
 fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = text.len() - 1;
     loop {
         if suf[i] > 0 && suf[i] < EMPTY {
-            // text[suf[i]] is non-empty, and has preceding character.
+            // text[suf[i]] is non-empty, and has a preceding character.
             let j = (suf[i] - 1).as_index();
             if text[j] < text[j + 1] || (text[j] == text[j + 1] && text[j].as_index() > i) {
-                // preceding character text[j] is s-type.
+                // the preceding character is s-type.
                 let p = text[j].as_index();
                 if suf[p] < EMPTY {
                     // right shift the borrowed chunk.
@@ -280,7 +296,7 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
                 }
 
                 if left_most {
-                    // leave lms-characters only.
+                    // only keep lms-suffixes if toggled left_most.
                     suf[i] = EMPTY;
                 }
             }
@@ -294,7 +310,7 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
         }
     }
 
-    // clean up counters.
+    // clean up bucket counters.
     for i in (0..suf.len()).rev() {
         if suf[i] > EMPTY {
             let n = as_counter(suf[i]);
@@ -303,7 +319,7 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
         }
     }
     if left_most {
-        // text[0] is not lms-character.
+        // text[0..] is not a lms-suffix.
         suf.iter_mut().filter(|p| **p == 0).for_each(|p| *p = EMPTY);
     }
 }
@@ -329,8 +345,6 @@ mod tests {
     #[test]
     fn tablecheck_sacak32() {
         let texts: &[&[u32]] = &[
-            &[],
-            &[0],
             &[0, 0, 0, 0, 0, 0],
             &[0, 0, 0, 0, 0, 1],
             &[5, 4, 3, 2, 1, 0],

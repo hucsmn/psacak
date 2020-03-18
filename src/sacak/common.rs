@@ -82,7 +82,7 @@ impl SacaCharType {
 }
 
 /// Enumerate characters and types, in reversed order.
-#[inline]
+#[inline(always)]
 pub fn foreach_typedchars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
@@ -111,7 +111,7 @@ where
 }
 
 /// Enumerate characters and types, in reversed order.
-#[inline]
+#[inline(always)]
 pub fn foreach_typedchars_mut<C, F>(text: &mut [C], mut f: F)
 where
     C: SacaChar,
@@ -140,7 +140,7 @@ where
 }
 
 /// Specialized lms-characters enumerator, in reversed order.
-#[inline]
+#[inline(always)]
 pub fn foreach_lmschars<C, F>(text: &[C], mut f: F)
 where
     C: SacaChar,
@@ -154,7 +154,7 @@ where
 }
 
 /// Calculate the length of lms-substring (probably contains sentinel).
-#[inline]
+#[inline(always)]
 pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
     if i == text.len() {
         return 1;
@@ -186,7 +186,7 @@ pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
 }
 
 /// Test if two lms-substrings of known length are equal.
-#[inline]
+#[inline(always)]
 pub fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, m: usize, j: usize, n: usize) -> bool {
     let p = i + m;
     let q = j + n;
@@ -216,7 +216,7 @@ impl<X: Uint> FingerPrint<X> {
 }
 
 /// Calculate the fingerprint of lms-substring.
-#[inline]
+#[inline(always)]
 pub fn lmssubs_getfp<C, X>(text: &[C], i: usize) -> FingerPrint<X>
 where
     C: SacaChar + As<X>,
@@ -268,6 +268,7 @@ where
 }
 
 /// Test if two lms-substrings of known fingerprints are equal.
+#[inline(always)]
 pub fn lmssubs_equalfp<C, X>(text: &[C], mut i: usize, fpi: FingerPrint<X>, mut j: usize, fpj: FingerPrint<X>) -> bool
 where
     C: SacaChar + As<X>,
@@ -291,6 +292,7 @@ where
 }
 
 /// Get ranks of the sorted lms-substrings in the head, to the tail of workspace.
+#[inline]
 pub fn rank_sorted_lmssubs<C, I, FP, GET, CMP>(text: &[C], suf: &mut [I], n: usize, getfp: GET, cmpfp: CMP) -> usize
 where
     C: SacaChar,
