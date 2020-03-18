@@ -1,33 +1,5 @@
 use super::types::*;
 
-/// Helper macro for the debug inspector.
-#[macro_export]
-macro_rules! inspect_here {
-    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-            inspect($text, $suf, &[$($ptr ,)*]);
-        }
-    };
-    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr $(, $ptr:expr)*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-            inspect($text, &[], &[$($ptr ,)*]);
-        }
-    };
-    ($( $fmt:expr $( , $args:expr )* );* => suf: $suf:expr $(, $ptr:expr)*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-            inspect(b"", $suf, &[$($ptr ,)*]);
-        }
-    };
-    ($( $fmt:expr $( , $args:expr )* );*) => {
-        if cfg!(debug_assertions) {
-            $( eprintln!($fmt $(, $args)*); )*
-        }
-    };
-}
-
 /// A stupid suffix array construction algorithm that handles tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
 where
@@ -151,7 +123,35 @@ where
     });
 }
 
-/// Debug inspector.
+/// Helper macro for the debug inspector.
+#[macro_export]
+macro_rules! inspect_here {
+    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect($text, $suf, &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect($text, &[], &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );* => suf: $suf:expr $(, $ptr:expr)*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+            inspect(b"", $suf, &[$($ptr ,)*]);
+        }
+    };
+    ($( $fmt:expr $( , $args:expr )* );*) => {
+        if cfg!(debug_assertions) {
+            $( eprintln!($fmt $(, $args)*); )*
+        }
+    };
+}
+
+/// Debug inspector routine.
 #[allow(unused)]
 pub fn inspect<C, I>(text: &[C], suf: &[I], cursors: &[usize])
 where

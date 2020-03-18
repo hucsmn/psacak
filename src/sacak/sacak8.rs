@@ -335,7 +335,7 @@ mod tests {
         calc_sacak8(&text[..]) == calc_naive8(&text[..])
     }
 
-    // helpers.
+    // helper funtions.
 
     fn calc_sacak8(text: &[u8]) -> Vec<u32> {
         let mut suf = vec![0u32; text.len()];
