@@ -117,17 +117,16 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 /// Put the sorted lms-suffixes, originally located in the head of workspace,
 /// to their corresponding bucket tails.
 #[inline]
-fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
+fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
     bkt.set_tail();
     suf[n..].iter_mut().for_each(|p| *p = 0);
 
-    for i in (0..n).rev() {
-        let x = suf[i];
-        suf[i] = 0;
-
-        let p = &mut bkt[text[x.as_index()]];
-        *p -= 1;
-        suf[p.as_index()] = x;
+    for c in (0..=255).rev() {
+        let m = bkt.get_lms_count(c);
+        let src = n - m..n;
+        let dest = bkt[c] as usize - m;
+        move_within(suf, src, dest, 0);
+        n -= m;
     }
 }
 
@@ -250,9 +249,27 @@ fn fast_induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     }
 }
 
+/// Copy within slice, then reset blank zone with given value.
+#[inline(always)]
+fn move_within<T: Copy>(slice: &mut [T], src: std::ops::Range<usize>, dest: usize, reset: T) {
+    let (i, j, k) = (src.start, src.end, dest);
+    slice.copy_within(src, dest);
+    let blank = if dest > j {
+        i..j
+    } else if dest > i {
+        i..k
+    } else if k + (j - i) > i {
+        k + (j - i)..j
+    } else {
+        i..j
+    };
+    slice[blank].iter_mut().for_each(|p| *p = reset);
+}
+
 /// Byte string bucket pointers.
 struct Buckets {
     ptrs: [u32; 256],
+    lms_counts: [u32; 256],
     cache: [u32; 257],
 }
 
@@ -262,8 +279,14 @@ impl Buckets {
         let mut bkt = Buckets {
             ptrs: [0; 256],
             cache: [0; 257],
+            lms_counts: [0; 256],
         };
-        text.iter().for_each(|&c| bkt.cache[c.as_index() + 1] += 1);
+        foreach_typedchars(text, |_, t, c| {
+            bkt.cache[c as usize + 1] += 1;
+            if t.is_lms() {
+                bkt.lms_counts[c as usize] += 1;
+            }
+        });
         bkt.cache[1..].iter_mut().fold(0, |sum, p| {
             *p += sum;
             *p
@@ -279,6 +302,11 @@ impl Buckets {
     #[inline(always)]
     pub fn set_tail(&mut self) {
         self.ptrs.copy_from_slice(&self.cache[1..257]);
+    }
+
+    #[inline(always)]
+    pub fn get_lms_count(&self, c: u8) -> usize {
+        self.lms_counts[c as usize] as usize
     }
 }
 
