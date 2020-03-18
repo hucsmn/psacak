@@ -5,9 +5,6 @@ use super::ranking::rank_lmssubs;
 use super::sacak32::sacak32;
 use super::types::*;
 
-/// Threshold to disable fast induce sort.
-const FAST_INDUCE_SIZE: usize = !(1u32 << 31) as usize;
-
 /// Sort suffix array for byte string.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
@@ -48,58 +45,26 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssufs(text, suf, &mut bkt, n);
-    induce_all(text, suf, &mut bkt);
+    induce_lchars(text, suf, &mut bkt, false);
+    induce_schars(text, suf, &mut bkt, false);
 }
 
 /// Induce sort all the lms-substrings into the head of workspace.
 fn sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> usize {
     // induce sort lms-substrings from lms-characters.
     put_lmschars(text, suf, bkt);
-    if text.len() <= FAST_INDUCE_SIZE {
-        fast_induce_lchars(text, suf, bkt);
-        fast_induce_schars(text, suf, bkt);
-    } else {
-        induce_lchars(text, suf, bkt, true);
-        induce_schars(text, suf, bkt, true);
-    }
+    induce_lchars(text, suf, bkt, true);
+    induce_schars(text, suf, bkt, true);
 
     // collect sorted lms-substrings into the head of workspace.
     let mut n = 0;
-    if text.len() <= FAST_INDUCE_SIZE {
-        for i in 0..suf.len() {
-            if suf[i] > 0 && suf[i] < (1 << 31) {
-                suf[n] = suf[i];
-                n += 1;
-            }
-        }
-    } else {
-        for i in 0..suf.len() {
-            if suf[i] > 0 {
-                suf[n] = suf[i];
-                n += 1;
-            }
+    for i in 0..suf.len() {
+        if suf[i] > 0 {
+            suf[n] = suf[i];
+            n += 1;
         }
     }
     n
-}
-
-/// Induce sort all the suffixes from sorted lms-suffixes.
-fn induce_all(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
-    // induce sort lms-substrings from lms-characters.
-    if text.len() <= FAST_INDUCE_SIZE {
-        fast_induce_lchars(text, suf, bkt);
-        fast_induce_schars(text, suf, bkt);
-
-        // recover non left most mark.
-        for p in suf.iter_mut() {
-            if *p >= (1 << 31) {
-                *p = p.wrapping_neg();
-            }
-        }
-    } else {
-        induce_lchars(text, suf, bkt, false);
-        induce_schars(text, suf, bkt, false);
-    }
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
@@ -188,63 +153,6 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
                     // only keep lms-suffixes.
                     suf[i] = 0;
                 }
-            }
-        }
-    }
-}
-
-/// Fast induce l-suffixes from s-suffixes.
-///
-/// Assumes that `text.len() < (1<<31)`,
-/// and non lms-suffixes among input `suf` have been marked as zero or negative.
-///
-/// Outputs the induced lml/l-suffixes, non lml-suffixes are marked as zero or negative.
-#[inline]
-fn fast_induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
-    bkt.set_head();
-
-    // the sentinel.
-    let p = &mut bkt[text[text.len() - 1]];
-    suf[p.as_index()] = u32::from_index(text.len() - 1);
-    *p += 1;
-
-    for i in 0..suf.len() {
-        if suf[i] > 0 && suf[i] < (1 << 31) {
-            // non-empty, left most, and has a preceding character.
-            let j = (suf[i] - 1).as_index();
-            let p = &mut bkt[text[j]];
-            if p.as_index() > i {
-                // the preceding character is l-type.
-                suf[p.as_index()] = u32::from_index(j);
-                *p += 1;
-                // mark non left most.
-                suf[i] = suf[i].wrapping_neg();
-            }
-        }
-    }
-}
-
-/// Fast induce s-suffixes from l-suffixes.
-///
-/// Assumes that `text.len() < (1<<31)`,
-/// and non lml-suffixes among input `suf` have been marked as zero or negative.
-///
-/// Outputs the induced lms/s-suffixes, non lms-suffixes are marked as zero or negative.
-#[inline]
-fn fast_induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
-    bkt.set_tail();
-
-    for i in (0..suf.len()).rev() {
-        if suf[i] > 0 && suf[i] < (1 << 31) {
-            // non-empty, left most, and has a preceding character.
-            let j = (suf[i] - 1).as_index();
-            let p = &mut bkt[text[j]];
-            if p.as_index() <= i {
-                // the preceding character is s-type.
-                *p -= 1;
-                suf[p.as_index()] = u32::from_index(j);
-                // mark non left most.
-                suf[i] = suf[i].wrapping_neg();
             }
         }
     }
