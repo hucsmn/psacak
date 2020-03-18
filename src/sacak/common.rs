@@ -66,18 +66,18 @@ where
     let mut stype = false;
     for i in (1..n).rev() {
         let next_stype = text[i - 1] < text[i] || (text[i - 1] == text[i] && stype);
-        let left_most = stype != next_stype;
-        f(i, SacaCharType { stype, left_most }, text[i]);
+        let t = SacaCharType {
+            stype,
+            left_most: stype != next_stype,
+        };
+        f(i, t, text[i]);
         stype = next_stype;
     }
-    f(
-        0,
-        SacaCharType {
-            stype,
-            left_most: false,
-        },
-        text[0],
-    );
+    let t = SacaCharType {
+        stype,
+        left_most: false,
+    };
+    f(0, t, text[0]);
 }
 
 /// Enumerate characters and types, in reversed order.
@@ -95,18 +95,18 @@ where
     let mut stype = false;
     for i in (1..n).rev() {
         let next_stype = text[i - 1] < text[i] || (text[i - 1] == text[i] && stype);
-        let left_most = stype != next_stype;
-        f(i, SacaCharType { stype, left_most }, &mut text[i]);
+        let t = SacaCharType {
+            stype,
+            left_most: stype != next_stype,
+        };
+        f(i, t, &mut text[i]);
         stype = next_stype;
     }
-    f(
-        0,
-        SacaCharType {
-            stype,
-            left_most: false,
-        },
-        &mut text[0],
-    );
+    let t = SacaCharType {
+        stype,
+        left_most: false,
+    };
+    f(0, t, &mut text[0]);
 }
 
 /// Specialized lms-characters enumerator, in reversed order.
@@ -116,11 +116,17 @@ where
     C: SacaChar,
     F: FnMut(usize, C),
 {
-    foreach_typedchars(text, |i, t, c| {
-        if t.is_lms() {
-            f(i, c)
+    if text.len() < 3 {
+        return;
+    }
+
+    let mut stype = false;
+    for i in (1..text.len() - 1).rev() {
+        stype = text[i] < text[i + 1] || (text[i] == text[i + 1] && stype);
+        if stype && text[i - 1] > text[i] {
+            f(i, text[i]);
         }
-    });
+    }
 }
 
 /// Helper macro for the debug inspector.
