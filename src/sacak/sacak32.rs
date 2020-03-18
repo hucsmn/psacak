@@ -1,4 +1,5 @@
 use super::common::*;
+use super::ranking::rank_lmssubs;
 use super::types::*;
 
 /// Empty mark in the workspace.
@@ -21,11 +22,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     let n = sort_lmssubs(text, suf);
 
     // get ranks of lms-substrings into the tail of workspace.
-    let k = if LMS_FINGERPRINT {
-        rank_sorted_lmssubs(text, suf, n, lmssubs_getfp::<u32, u128>, lmssubs_equalfp::<u32, u128>)
-    } else {
-        rank_sorted_lmssubs(text, suf, n, lmssubs_getlen, lmssubs_equal)
-    };
+    let k = rank_lmssubs(text, suf, n);
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings
@@ -164,9 +161,9 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
 }
 
 /// Induce l-suffixes (or lml-suffixes) from sorted lms-suffixes.
-/// 
+///
 /// Assumes that non lms-suffixes among the input `suf` have been reset as `EMPTY`.
-/// 
+///
 /// Outputs the induced l-suffixes with the input lms-suffixes reset to `EMPTY`,
 /// or the induced lml-suffixes with all other suffixes reset to `EMPTY`.
 #[inline]
@@ -246,10 +243,10 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
 }
 
 /// Induce s-suffixes (or lms-suffixes) from sorted l-suffixes (or lml-suffixes).
-/// 
+///
 /// Assumes that non l-suffixes (or non lml-suffixes) among the input `suf`
 /// have been reset as `EMPTY`.
-/// 
+///
 /// Outputs the induced s-suffixes together with the input l-suffixes,
 /// or the induced lms-suffixes with all other suffixes reset to `EMPTY`.
 #[inline]

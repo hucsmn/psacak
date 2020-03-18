@@ -1,10 +1,11 @@
 use std::ops::{Index, IndexMut};
 
 use super::common::*;
+use super::ranking::rank_lmssubs;
 use super::sacak32::sacak32;
 use super::types::*;
 
-const FAST_INDUCE_SIZE: usize = !(1u32<<31) as usize;
+const FAST_INDUCE_SIZE: usize = !(1u32 << 31) as usize;
 
 /// Sort suffix array for byte string.
 #[inline]
@@ -21,11 +22,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     let n = sort_lmssubs(text, suf, &mut bkt);
 
     // get ranks of lms-substrings into the tail of workspace.
-    let k = if LMS_FINGERPRINT {
-        rank_sorted_lmssubs(text, suf, n, lmssubs_getfp::<u8, u128>, lmssubs_equalfp::<u8, u128>)
-    } else {
-        rank_sorted_lmssubs(text, suf, n, lmssubs_getlen, lmssubs_equal)
-    };
+    let k = rank_lmssubs(text, suf, n);
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings
@@ -69,7 +66,7 @@ fn sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> usize {
     let mut n = 0;
     if text.len() <= FAST_INDUCE_SIZE {
         for i in 0..suf.len() {
-            if suf[i] > 0 && suf[i] < (1<<31) {
+            if suf[i] > 0 && suf[i] < (1 << 31) {
                 suf[n] = suf[i];
                 n += 1;
             }
@@ -94,7 +91,7 @@ fn induce_all(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 
         // recover non left most mark.
         for p in suf.iter_mut() {
-            if *p >= (1<<31) {
+            if *p >= (1 << 31) {
                 *p = p.wrapping_neg();
             }
         }
@@ -135,9 +132,9 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, n: usize) {
 }
 
 /// Induce l-suffixes (or lml-suffixes) from sorted lms-suffixes.
-/// 
+///
 /// Assumes that non lms-suffixes among the input `suf` have been marked as zero.
-/// 
+///
 /// Outputs the induced l-suffixes together with the input lms-suffixes,
 /// or the induced lml-suffixes with any other suffixes marked as zero.
 #[inline]
@@ -168,10 +165,10 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 }
 
 /// Induce s-suffixes (or lms-suffixes) from sorted l-suffixes (or lml-suffixes).
-/// 
+///
 /// Assumes that non l-suffixes (or non lml-suffixes) among input `suf`
 /// have been marked as zero.
-/// 
+///
 /// Outputs the induced s-suffixes together with the input l-suffixes,
 /// or the induced lms-suffixes with any other suffixes marked as zero.
 #[inline]
@@ -197,10 +194,10 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 }
 
 /// Fast induce l-suffixes from s-suffixes.
-/// 
+///
 /// Assumes that `text.len() < (1<<31)`,
 /// and non lms-suffixes among input `suf` have been marked as zero or negative.
-/// 
+///
 /// Outputs the induced lml/l-suffixes, non lml-suffixes are marked as zero or negative.
 #[inline]
 fn fast_induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
@@ -212,7 +209,7 @@ fn fast_induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     *p += 1;
 
     for i in 0..suf.len() {
-        if suf[i] > 0 && suf[i] < (1<<31) {
+        if suf[i] > 0 && suf[i] < (1 << 31) {
             // non-empty, left most, and has a preceding character.
             let j = (suf[i] - 1).as_index();
             let p = &mut bkt[text[j]];
@@ -228,17 +225,17 @@ fn fast_induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 }
 
 /// Fast induce s-suffixes from l-suffixes.
-/// 
+///
 /// Assumes that `text.len() < (1<<31)`,
 /// and non lml-suffixes among input `suf` have been marked as zero or negative.
-/// 
+///
 /// Outputs the induced lms/s-suffixes, non lms-suffixes are marked as zero or negative.
 #[inline]
 fn fast_induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.set_tail();
 
     for i in (0..suf.len()).rev() {
-        if suf[i] > 0 && suf[i] < (1<<31) {
+        if suf[i] > 0 && suf[i] < (1 << 31) {
             // non-empty, left most, and has a preceding character.
             let j = (suf[i] - 1).as_index();
             let p = &mut bkt[text[j]];

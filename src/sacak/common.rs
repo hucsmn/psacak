@@ -1,8 +1,6 @@
 use super::types::*;
 
-/// Switch: lms substring compare by fingerprint.
-pub const LMS_FINGERPRINT: bool = true;
-
+/// Helper macro for the debug inspector.
 #[macro_export]
 macro_rules! inspect_here {
     ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr, suf: $suf:expr $(, $ptr:expr)*) => {
@@ -30,7 +28,7 @@ macro_rules! inspect_here {
     };
 }
 
-/// Naive suffix array construction that sorts tiny input.
+/// A stupid suffix array construction algorithm that handles tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
 where
     C: SacaChar,
@@ -151,188 +149,6 @@ where
             f(i, c)
         }
     });
-}
-
-/// Calculate the length of lms-substring (probably contains sentinel).
-#[inline(always)]
-pub fn lmssubs_getlen<C: SacaChar>(text: &[C], i: usize) -> usize {
-    if i == text.len() {
-        return 1;
-    }
-
-    let mut n = 1;
-
-    // upslope and plateau.
-    while i + n < text.len() && text[i + n] >= text[i + n - 1] {
-        n += 1;
-    }
-
-    // downslope and valley.
-    while i + n < text.len() && text[i + n] <= text[i + n - 1] {
-        n += 1;
-    }
-
-    // include sentinel.
-    if i + n == text.len() {
-        return n + 1;
-    }
-
-    // exclude the trailing part of valley.
-    while n > 0 && text[i + n - 1] == text[i + n - 2] {
-        n -= 1;
-    }
-
-    n
-}
-
-/// Test if two lms-substrings of known length are equal.
-#[inline(always)]
-pub fn lmssubs_equal<C: SacaChar>(text: &[C], i: usize, m: usize, j: usize, n: usize) -> bool {
-    let p = i + m;
-    let q = j + n;
-    if i == j {
-        return true;
-    }
-    if m != n || p > text.len() || q > text.len() {
-        return false;
-    }
-
-    &text[i..p] == &text[j..q]
-}
-
-/// Finger print of lms-substring.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct FingerPrint<X: Uint> {
-    // length including sentinel.
-    len: usize,
-    // prefix of the lms-substring.
-    fp: X,
-}
-
-impl<X: Uint> FingerPrint<X> {
-    fn new(len: usize, fp: X) -> Self {
-        FingerPrint { len, fp }
-    }
-}
-
-/// Calculate the fingerprint of lms-substring.
-#[inline(always)]
-pub fn lmssubs_getfp<C, X>(text: &[C], i: usize) -> FingerPrint<X>
-where
-    C: SacaChar + As<X>,
-    X: Uint,
-{
-    if i == text.len() {
-        return FingerPrint::new(1, C::MAX.r#as());
-    }
-
-    let mut n = 1;
-    let mut fp = text[i].r#as();
-
-    // upslope and plateau.
-    while i + n < text.len() && text[i + n] >= text[i + n - 1] {
-        if n < X::SIZE / C::SIZE {
-            fp <<= C::BIT_WIDTH;
-            fp |= text[i + n].r#as();
-        }
-        n += 1;
-    }
-
-    // downslope and valley.
-    while i + n < text.len() && text[i + n] <= text[i + n - 1] {
-        if n < X::SIZE / C::SIZE {
-            fp <<= C::BIT_WIDTH;
-            fp |= text[i + n].r#as();
-        }
-        n += 1;
-    }
-
-    // include sentinel.
-    if i + n == text.len() {
-        n += 1;
-        if n < X::SIZE / C::SIZE {
-            fp <<= C::BIT_WIDTH;
-            fp |= C::MAX.r#as(); // C::MAX cannot be s-type.
-        }
-    } else {
-        // exclude the trailing part of valley.
-        while n > 0 && text[i + n - 1] == text[i + n - 2] {
-            n -= 1;
-            if n < X::SIZE / C::SIZE {
-                fp >>= C::BIT_WIDTH;
-            }
-        }
-    }
-
-    FingerPrint::new(n, fp)
-}
-
-/// Test if two lms-substrings of known fingerprints are equal.
-#[inline(always)]
-pub fn lmssubs_equalfp<C, X>(text: &[C], mut i: usize, fpi: FingerPrint<X>, mut j: usize, fpj: FingerPrint<X>) -> bool
-where
-    C: SacaChar + As<X>,
-    X: Uint,
-{
-    if i == j {
-        return true;
-    }
-    let p = i + fpi.len;
-    let q = j + fpj.len;
-    if fpi != fpj || p > text.len() || q > text.len() {
-        return false;
-    }
-
-    if fpi.len <= X::SIZE / C::SIZE {
-        return true;
-    }
-    i += X::SIZE / C::SIZE;
-    j += X::SIZE / C::SIZE;
-    &text[i..p] == &text[j..q]
-}
-
-/// Get ranks of the sorted lms-substrings in the head, to the tail of workspace.
-#[inline]
-pub fn rank_sorted_lmssubs<C, I, FP, GET, CMP>(text: &[C], suf: &mut [I], n: usize, getfp: GET, cmpfp: CMP) -> usize
-where
-    C: SacaChar,
-    I: SacaIndex,
-    FP: Copy + Eq,
-    GET: Fn(&[C], usize) -> FP,
-    CMP: Fn(&[C], usize, FP, usize, FP) -> bool,
-{
-    if n == 0 {
-        return 0;
-    }
-
-    // insert ranks of lms-substrings by their occurrence order in text.
-    let mut k = 1;
-    let mut fp0 = getfp(text, suf[0].as_index());
-    let (lmssubs, work) = suf.split_at_mut(n);
-    work.iter_mut().for_each(|p| *p = I::MAX);
-    work[lmssubs[0].as_index() / 2] = I::ZERO;
-    for i in 1..n {
-        let x1 = lmssubs[i].as_index();
-        let x0 = lmssubs[i - 1].as_index();
-        let fp1 = getfp(text, x1);
-        if !cmpfp(text, x0, fp0, x1, fp1) {
-            k += 1;
-        }
-        work[x1 / 2] = I::from_index(k - 1);
-        fp0 = fp1;
-    }
-
-    // compact ranks to the tail if needed.
-    if k < n {
-        let mut p = work.len();
-        for i in (0..work.len()).rev() {
-            if work[i] != I::MAX {
-                p -= 1;
-                work[p] = work[i];
-            }
-        }
-    }
-    k
 }
 
 /// Debug inspector.

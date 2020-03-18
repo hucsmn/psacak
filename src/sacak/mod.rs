@@ -1,5 +1,6 @@
 #[macro_use]
 mod common;
+mod ranking;
 mod sacak32;
 mod sacak8;
 mod types;
