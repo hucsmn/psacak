@@ -1,3 +1,4 @@
+use super::common::*;
 use super::types::*;
 
 /// Get ranks of the sorted lms-substrings originally located in the head.
@@ -64,6 +65,28 @@ where
         }
     }
     k
+}
+
+/// Unrank sorted lms-suffixes into the head of workspace,
+/// from the solved suffix array of subproblem in the head of workspace.
+#[inline]
+pub fn unrank_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    // get the original problem in the tail of workspace.
+    let mut p = suf.len();
+    foreach_lmschars(text, |i, _| {
+        p -= 1;
+        suf[p] = I::from_index(i);
+    });
+
+    // permutate lms-substrings in place, using the suffix array of subproblem.
+    for i in 0..n {
+        let j = suf[i].as_index();
+        suf[i] = suf[suf.len() - n + j];
+    }
 }
 
 // Length of lms-substring as fingerprint.

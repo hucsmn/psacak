@@ -1,7 +1,7 @@
 use std::ops::{Index, IndexMut};
 
 use super::common::*;
-use super::ranking::rank_lmssubs;
+use super::ranking::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
@@ -17,44 +17,9 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort lms-substrings.
     let mut bkt = Buckets::new(text);
-    let n = sort_lmssubs(text, suf, &mut bkt);
-
-    // get ranks of lms-substrings into the tail of workspace.
-    let k = rank_lmssubs(text, suf, n);
-
-    if k < n {
-        // order of lms-suffixes != order of lms-substrings
-        {
-            let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
-            sacak32(subtext, subsuf, k);
-        }
-
-        // get the original problem.
-        let mut p = suf.len();
-        foreach_lmschars(text, |i, _| {
-            p -= 1;
-            suf[p] = u32::from_index(i);
-        });
-
-        // permutate lms-substrings by the suffix array of subproblem.
-        for i in 0..n {
-            let j = suf[i].as_index();
-            suf[i] = suf[suf.len() - n + j];
-        }
-    }
-
-    // induce sort the suffix array from sorted lms-suffixes.
-    put_lmssufs(text, suf, &mut bkt, n);
-    induce_lchars(text, suf, &mut bkt, false);
-    induce_schars(text, suf, &mut bkt, false);
-}
-
-/// Induce sort all the lms-substrings into the head of workspace.
-fn sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> usize {
-    // induce sort lms-substrings from lms-characters.
-    put_lmschars(text, suf, bkt);
-    induce_lchars(text, suf, bkt, true);
-    induce_schars(text, suf, bkt, true);
+    put_lmschars(text, suf, &mut bkt);
+    induce_lchars(text, suf, &mut bkt, true);
+    induce_schars(text, suf, &mut bkt, true);
 
     // collect sorted lms-substrings into the head of workspace.
     let mut n = 0;
@@ -64,7 +29,24 @@ fn sort_lmssubs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) -> usize {
             n += 1;
         }
     }
-    n
+
+    // get ranks of lms-substrings into the tail of workspace.
+    let k = rank_lmssubs(text, suf, n);
+
+    if k < n {
+        // order of lms-suffixes != order of lms-substrings.
+        // need further recursive sort of lms-suffixes.
+        {
+            let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
+            sacak32(subtext, subsuf, k);
+        }
+        unrank_lmssufs(text, suf, n);
+    }
+
+    // induce sort the suffix array from sorted lms-suffixes.
+    put_lmssufs(text, suf, &mut bkt, n);
+    induce_lchars(text, suf, &mut bkt, false);
+    induce_schars(text, suf, &mut bkt, false);
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
@@ -223,15 +205,15 @@ impl Index<u8> for Buckets {
     type Output = u32;
 
     #[inline(always)]
-    fn index(&self, i: u8) -> &Self::Output {
-        &self.ptrs[i as usize]
+    fn index(&self, c: u8) -> &Self::Output {
+        &self.ptrs[c as usize]
     }
 }
 
 impl IndexMut<u8> for Buckets {
     #[inline(always)]
-    fn index_mut(&mut self, i: u8) -> &mut Self::Output {
-        &mut self.ptrs[i as usize]
+    fn index_mut(&mut self, c: u8) -> &mut Self::Output {
+        &mut self.ptrs[c as usize]
     }
 }
 

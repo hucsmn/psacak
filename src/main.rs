@@ -29,13 +29,13 @@ fn main() {
         process::exit(1);
     }
 
-    eprint!(" time: ");
     let mut suf = vec![0; text.len()];
+    let mut times = String::new();
     for _ in 0..TIMES {
         let ((), dur) = timeit(|| sacak::sacak(&text[..], &mut suf[..]));
-        eprint!("{:.3}s ", dur.as_secs_f64());
+        times.push_str(format!("{:.3}s ", dur.as_secs_f64()).as_str());
     }
-    eprintln!("");
+    eprintln!(" time: {}", times);
 
     eprintln!("  rss: {:.3}MiB", peak_rss_kib() as f64 / 1024.0);
     eprintln!("check: {}", validate(&text[..], &suf[..]));

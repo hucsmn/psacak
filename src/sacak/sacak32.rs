@@ -1,5 +1,5 @@
 use super::common::*;
-use super::ranking::rank_lmssubs;
+use super::ranking::*;
 use super::types::*;
 
 /// Empty mark in the workspace.
@@ -19,30 +19,30 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     translate_text(text, suf, k);
 
     // induce sort lms-substrings.
-    let n = sort_lmssubs(text, suf);
+    put_lmschars(text, suf);
+    induce_lchars(text, suf, true);
+    induce_schars(text, suf, true);
+
+    // collect sorted lms-substrings into the head of workspace.
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] < EMPTY {
+            suf[n] = suf[i];
+            n += 1;
+        }
+    }
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = rank_lmssubs(text, suf, n);
 
     if k < n {
-        // order of lms-suffixes != order of lms-substrings
+        // order of lms-suffixes != order of lms-substrings.
+        // need further recursive sort of lms-suffixes.
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);
         }
-
-        // get the original problem.
-        let mut p = suf.len();
-        foreach_lmschars(text, |i, _| {
-            p -= 1;
-            suf[p] = u32::from_index(i);
-        });
-
-        // permutate lms-substrings by the suffix array of subproblem.
-        for i in 0..n {
-            let j = suf[i].as_index();
-            suf[i] = suf[suf.len() - n + j];
-        }
+        unrank_lmssufs(text, suf, n);
     }
 
     // induce sort the suffix array from sorted lms-suffixes.
@@ -74,24 +74,6 @@ fn translate_text(text: &mut [u32], suf: &mut [u32], k: usize) {
             *p = suf[c] - 1;
         }
     })
-}
-
-/// Induce sort all the lms-substrings into the head of workspace.
-fn sort_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
-    // induce sort lms-substrings.
-    put_lmschars(text, suf);
-    induce_lchars(text, suf, true);
-    induce_schars(text, suf, true);
-
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] < EMPTY {
-            suf[n] = suf[i];
-            n += 1;
-        }
-    }
-    n
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
