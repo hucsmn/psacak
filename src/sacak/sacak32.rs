@@ -2,10 +2,12 @@ use super::common::*;
 use super::ranking::*;
 use super::types::*;
 
-/// Empty mark in the workspace.
+/// Empty symbol in workspace.
 const EMPTY: u32 = 1 << 31;
 
-/// Sort suffix array for integer string (alphabet size k).
+/// SACA-K inner level sort algorithm for integer strings (alphabet size k).
+/// 
+/// Assumes that for each c in text, c < k.
 #[inline]
 pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     let suf = &mut suf[..text.len()];
@@ -15,29 +17,21 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
         return;
     }
 
-    // make bucket pointers by rewriting text.
-    translate_text(text, suf, k);
+    // make buckets by rewriting text.
+    make_buckets(text, suf, k);
 
     // induce sort lms-substrings.
     put_lmschars(text, suf);
     induce_lchars(text, suf, true);
     induce_schars(text, suf, true);
-
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] < EMPTY {
-            suf[n] = suf[i];
-            n += 1;
-        }
-    }
+    let n = compact_lmssubs(text, suf);
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = rank_lmssubs(text, suf, n);
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings.
-        // need further recursive sort of lms-suffixes.
+        // need to further sort the lms-suffixes.
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);
@@ -51,10 +45,11 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
     induce_schars(text, suf, false);
 }
 
-/// Translate characters to their corresponding bucket pointers.
-/// The lexicographical order would be unchanged.
+/// Rewrite characters to their corresponding bucket pointers.
+/// 
+/// The lexicographical order would keep unchanged.
 #[inline]
-fn translate_text(text: &mut [u32], suf: &mut [u32], k: usize) {
+fn make_buckets(text: &mut [u32], suf: &mut [u32], k: usize) {
     // calculate bucket pointers.
     suf[..k + 1].iter_mut().for_each(|p| *p = 0);
     text.iter().for_each(|&c| suf[c as usize + 1] += 1);
@@ -92,19 +87,19 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
 
         if suf[p] == EMPTY {
             if p > 0 && suf[p - 1] == EMPTY {
-                suf[p] = from_counter(1);
-                suf[p - 1] = u32::from_index(i);
+                suf[p] = to_counter(1);
+                suf[p - 1] = i as u32;
             } else {
-                suf[p] = u32::from_index(i);
+                suf[p] = i as u32;
             }
         } else {
-            let q = p - as_counter(suf[p]);
+            let q = p - get_counter(suf[p]);
             if q > 0 && suf[q - 1] == EMPTY {
                 suf[p] -= 1;
-                suf[q - 1] = u32::from_index(i);
+                suf[q - 1] = i as u32;
             } else {
                 suf.copy_within(q..p, q + 1);
-                suf[q] = u32::from_index(i);
+                suf[q] = i as u32;
             }
         }
     });
@@ -112,11 +107,24 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     // clean up counters.
     for i in (1..suf.len()).rev() {
         if suf[i] > EMPTY {
-            let n = as_counter(suf[i]);
+            let n = get_counter(suf[i]);
             suf.copy_within(i - n..i, i - n + 1);
             suf[i - n] = EMPTY;
         }
     }
+}
+
+/// Compact the sorted lms-substrings into the head of workspace.
+#[inline]
+fn compact_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] < EMPTY {
+            suf[n] = suf[i];
+            n += 1;
+        }
+    }
+    n
 }
 
 /// Put the sorted lms-suffixes, originally located in the head of workspace,
@@ -153,10 +161,10 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     // the sentinel.
     let p = text[text.len() - 1] as usize;
     if p + 1 < suf.len() && suf[p + 1] == EMPTY {
-        suf[p] = from_counter(1);
-        suf[p + 1] = u32::from_index(text.len() - 1);
+        suf[p] = to_counter(1);
+        suf[p + 1] = (text.len() - 1) as u32;
     } else {
-        suf[p] = u32::from_index(text.len() - 1);
+        suf[p] = (text.len() - 1) as u32;
     }
 
     let mut i = 0;
@@ -182,19 +190,19 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
 
                 if suf[p] == EMPTY {
                     if p + 1 < suf.len() && suf[p + 1] == EMPTY {
-                        suf[p] = from_counter(1);
-                        suf[p + 1] = u32::from_index(j);
+                        suf[p] = to_counter(1);
+                        suf[p + 1] = j as u32;
                     } else {
-                        suf[p] = u32::from_index(j);
+                        suf[p] = j as u32;
                     }
                 } else {
-                    let q = p + 1 + as_counter(suf[p]);
+                    let q = p + 1 + get_counter(suf[p]);
                     if q < suf.len() && suf[q] == EMPTY {
                         suf[p] -= 1;
-                        suf[q] = u32::from_index(j);
+                        suf[q] = j as u32;
                     } else {
                         suf.copy_within(p + 1..q, p);
-                        suf[q - 1] = u32::from_index(j);
+                        suf[q - 1] = j as u32;
                         if i > p {
                             // shift cursor.
                             i -= 1;
@@ -220,7 +228,7 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     // clean up bucket counters.
     for i in 0..suf.len() {
         if suf[i] > EMPTY {
-            let n = as_counter(suf[i]);
+            let n = get_counter(suf[i]);
             suf.copy_within(i + 1..i + 1 + n, i);
             suf[i + n] = EMPTY;
         }
@@ -263,19 +271,19 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
 
                 if suf[p] == EMPTY {
                     if p > 0 && suf[p - 1] == EMPTY {
-                        suf[p] = from_counter(1);
-                        suf[p - 1] = u32::from_index(j);
+                        suf[p] = to_counter(1);
+                        suf[p - 1] = j as u32;
                     } else {
-                        suf[p] = u32::from_index(j);
+                        suf[p] = j as u32;
                     }
                 } else {
-                    let q = p - as_counter(suf[p]);
+                    let q = p - get_counter(suf[p]);
                     if q > 0 && suf[q - 1] == EMPTY {
                         suf[p] -= 1;
-                        suf[q - 1] = u32::from_index(j);
+                        suf[q - 1] = j as u32;
                     } else {
                         suf.copy_within(q..p, q + 1);
-                        suf[q] = u32::from_index(j);
+                        suf[q] = j as u32;
                         if i < p {
                             // shift cursor.
                             i += 1;
@@ -301,7 +309,7 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
     // clean up bucket counters.
     for i in (0..suf.len()).rev() {
         if suf[i] > EMPTY {
-            let n = as_counter(suf[i]);
+            let n = get_counter(suf[i]);
             suf.copy_within(i - n..i, i - n + 1);
             suf[i - n] = EMPTY;
         }
@@ -313,12 +321,12 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
 }
 
 #[inline(always)]
-fn as_counter(i: u32) -> usize {
+fn get_counter(i: u32) -> usize {
     (-(i as i32)) as u32 as usize
 }
 
 #[inline(always)]
-fn from_counter(n: usize) -> u32 {
+fn to_counter(n: usize) -> u32 {
     (-(n as u32 as i32)) as u32
 }
 

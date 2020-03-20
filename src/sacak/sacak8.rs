@@ -5,7 +5,7 @@ use super::ranking::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
-/// Sort suffix array for byte string.
+/// SACA-K outer level sort algorithm for byte strings.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     let suf = &mut suf[..text.len()];
@@ -15,27 +15,21 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
         return;
     }
 
-    // induce sort lms-substrings.
+    // make buckets.
     let mut bkt = Buckets::new(text);
+
+    // induce sort lms-substrings.
     put_lmschars(text, suf, &mut bkt);
     induce_lchars(text, suf, &mut bkt, true);
     induce_schars(text, suf, &mut bkt, true);
-
-    // collect sorted lms-substrings into the head of workspace.
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] > 0 {
-            suf[n] = suf[i];
-            n += 1;
-        }
-    }
+    let n = compact_lmssubs(text, suf);
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = rank_lmssubs(text, suf, n);
 
     if k < n {
         // order of lms-suffixes != order of lms-substrings.
-        // need further recursive sort of lms-suffixes.
+        // need to further sort the lms-suffixes.
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);
@@ -66,6 +60,19 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
         p -= 1;
         suf[p] = i as u32;
     });
+}
+
+/// Compact the sorted lms-substrings into the head of workspace.
+#[inline]
+fn compact_lmssubs(text: &[u8], suf: &mut [u32]) -> usize {
+    let mut n = 0;
+    for i in 0..suf.len() {
+        if suf[i] > 0 {
+            suf[n] = suf[i];
+            n += 1;
+        }
+    }
+    n
 }
 
 /// Put the sorted lms-suffixes, originally located in the head of workspace,
