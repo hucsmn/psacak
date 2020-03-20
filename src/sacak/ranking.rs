@@ -7,9 +7,6 @@ use super::types::*;
 /// Threshold to disable parallel ranking for little amount of lms-substrings.
 const PARALLEL_RANK_THRESHOLD: usize = 32768;
 
-/// Threshold to disable parallel unranking for little amount of lms-substrings.
-const PARALLEL_UNRANK_THRESHOLD: usize = 32768;
-
 /// Get ranks of the sorted lms-substrings originally located in the head.
 ///
 /// Then place these ranks to the tail of workspace.
@@ -332,47 +329,8 @@ where
     });
 
     // permutate lms-substrings in place, using the suffix array of subproblem.
-    permut_lmssufs(text, suf, n);
-}
-
-// permutate lms-substrings in place, using the suffix array of subproblem.
-#[cfg(not(feature = "parallel"))]
-#[inline(always)]
-fn permut_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
-where
-    C: SacaChar,
-    I: SacaIndex,
-{
     for i in 0..n {
         let j = suf[i].as_index();
         suf[i] = suf[suf.len() - n + j];
     }
-}
-
-// permutate lms-substrings in place, using the suffix array of subproblem.
-#[cfg(feature = "parallel")]
-#[inline(always)]
-fn permut_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
-where
-    C: SacaChar,
-    I: SacaIndex,
-{
-    if n < PARALLEL_UNRANK_THRESHOLD {
-        for i in 0..n {
-            let j = suf[i].as_index();
-            suf[i] = suf[suf.len() - n + j];
-        }
-        return;
-    }
-
-    let (permut, rest) = suf.split_at_mut(n);
-    let (_, lmschars) = rest.split_at_mut(rest.len() - n);
-    let jobs = rayon::current_num_threads();
-    let chunk_size = if n % jobs == 0 { n / jobs } else { n / jobs + 1 };
-    permut.par_chunks_mut(chunk_size).for_each(|chunk| {
-        for i in 0..chunk.len() {
-            let x = chunk[i].as_index();
-            chunk[i] = lmschars[x];
-        }
-    });
 }
