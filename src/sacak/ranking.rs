@@ -11,7 +11,7 @@ const PARALLEL_RANK_THRESHOLD: usize = 32768;
 ///
 /// Then place these ranks to the tail of workspace.
 ///
-/// Assumes that `n <= suf.len() / 2 < (I::MAX >> 1)`.
+/// Assumes that `n <= suf.len() / 2 < I::MAX / 2`.
 #[inline]
 pub fn rank_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
@@ -55,7 +55,7 @@ pub type DefaultLmsFingerprint = UintFingerprint<u128>;
 ///
 /// Then place these ranks to the tail of workspace.
 ///
-/// Assumes that `n <= suf.len() / 2 < (I::MAX >> 1)`.
+/// Assumes that `n <= suf.len() / 2 < I::MAX / 2`.
 #[cfg(not(feature = "parallel"))]
 #[inline]
 pub fn rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
@@ -71,7 +71,7 @@ where
 ///
 /// Then place these ranks to the tail of workspace.
 ///
-/// Assumes that `n <= suf.len() / 2 < (I::MAX >> 1)`.
+/// Assumes that `n <= suf.len() / 2 < I::MAX / 2`.
 #[cfg(feature = "parallel")]
 #[inline]
 pub fn rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
@@ -80,8 +80,6 @@ where
     I: SacaIndex,
     FP: Fingerprint<C>,
 {
-    debug_assert!(n <= suf.len() / 2);
-    debug_assert!(suf.len() / 2 < (I::MAX >> 1).as_index());
     par_rank_lmssubs_using::<C, I, FP>(text, suf, n)
 }
 
@@ -148,7 +146,7 @@ where
     } else {
         (n - 1) / jobs + 1
     };
-    work.iter_mut().for_each(|p| *p = I::MAX >> 1);
+    work.iter_mut().for_each(|p| *p = I::LOWER_BITS);
     lmssubs[1..]
         .par_chunks(chunk_size)
         .enumerate()
@@ -161,7 +159,7 @@ where
                 let fp1 = FP::get(text, x1);
                 if !FP::equals(text, x0, fp0, x1, fp1) {
                     // set highest bit if two neighboring lms-substrings are different.
-                    work_chunk[j] |= !(I::MAX >> 1);
+                    work_chunk[j] |= I::HIGHEST_BIT;
                 }
                 x0 = x1;
                 fp0 = fp1;
@@ -172,13 +170,13 @@ where
     let mut k = 1;
     for i in 0..n {
         let x = lmssubs[i].as_index();
-        let equals = work[i] & !(I::MAX >> 1) == I::ZERO;
+        let equals = work[i] & I::HIGHEST_BIT == I::ZERO;
         if !equals {
             k += 1;
         }
         if x / 2 < n {
             // keep comparison results;
-            work[x / 2] = (work[x / 2] & !(I::MAX >> 1)) | (I::from_index(k - 1) & (I::MAX >> 1));
+            work[x / 2] = (work[x / 2] & I::HIGHEST_BIT) | (I::from_index(k - 1) & I::LOWER_BITS);
         } else {
             work[x / 2] = I::from_index(k - 1);
         }
@@ -188,8 +186,8 @@ where
     if k < n {
         let mut p = work.len();
         for i in (0..work.len()).rev() {
-            let x = work[i] & (I::MAX >> 1);
-            if x != (I::MAX >> 1) {
+            let x = work[i] & I::LOWER_BITS;
+            if x != I::LOWER_BITS {
                 p -= 1;
                 work[p] = x;
             }

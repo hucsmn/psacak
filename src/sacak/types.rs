@@ -69,10 +69,8 @@ pub trait Uint:
     const MAX: Self;
     const SIZE: usize;
     const BIT_WIDTH: u8;
-
-    type NonZero: NonZeroUint;
-
-    fn into_nonzero(self) -> Option<Self::NonZero>;
+    const HIGHEST_BIT: Self;
+    const LOWER_BITS: Self;
 
     fn wrapping_add(self, other: Self) -> Self;
     fn saturating_add(self, other: Self) -> Self;
@@ -95,7 +93,7 @@ macro_rules! forward_binops_for_impl_uint {
 }
 
 macro_rules! impl_uint {
-    ($($uint:ident($nonzero:ident);)*) => {
+    ($($uint:ident),*) => {
         $(
             impl Uint for $uint {
                 const ZERO: Self = 0;
@@ -103,13 +101,8 @@ macro_rules! impl_uint {
                 const MAX: Self = std::$uint::MAX;
                 const SIZE: usize = size_of::<$uint>();
                 const BIT_WIDTH: u8 = 8 * (size_of::<$uint>() as u8);
-
-                type NonZero = $nonzero;
-
-                #[inline(always)]
-                fn into_nonzero(self) -> Option<Self::NonZero> {
-                    Self::NonZero::new(self)
-                }
+                const HIGHEST_BIT: Self = 1 << (Self::BIT_WIDTH - 1);
+                const LOWER_BITS: Self = !Self::HIGHEST_BIT;
 
                 forward_binops_for_impl_uint! { $uint =>
                     wrapping_add -> Self,
@@ -124,51 +117,7 @@ macro_rules! impl_uint {
     };
 }
 
-impl_uint! {
-    u8(NonZeroU8);
-    u16(NonZeroU16);
-    u32(NonZeroU32);
-    u64(NonZeroU64);
-    u128(NonZeroU128);
-    usize(NonZeroUsize);
-}
-
-/// Non-zero unsigned integer type.
-pub trait NonZeroUint: Copy + Eq + Ord {
-    type Zeroable: Uint;
-
-    fn from_zeroable(x: Self::Zeroable) -> Option<Self>;
-    fn into_zeroable(self) -> Self::Zeroable;
-}
-
-macro_rules! impl_nonzero {
-    ($($nonzero:ident($uint:ident);)*) => {
-        $(
-            impl NonZeroUint for $nonzero {
-                type Zeroable = $uint;
-
-                #[inline(always)]
-                fn from_zeroable(x: $uint) -> Option<Self> {
-                    Self::new(x)
-                }
-
-                #[inline(always)]
-                fn into_zeroable(self) -> $uint {
-                    self.get()
-                }
-            }
-        )*
-    };
-}
-
-impl_nonzero! {
-    NonZeroU8(u8);
-    NonZeroU16(u16);
-    NonZeroU32(u32);
-    NonZeroU64(u64);
-    NonZeroU128(u128);
-    NonZeroUsize(usize);
-}
+impl_uint!(u8, u16, u32, u64, u128, usize);
 
 /// Types that could be casted into usize.
 pub trait AsIndex: Copy {
@@ -188,13 +137,12 @@ macro_rules! impl_as_index {
     };
 }
 
-impl_as_index!(u8, u32, usize);
+impl_as_index!(u8, u16, u32, usize);
 
 /// Text character type.
 pub trait SacaChar: Uint + AsIndex {}
 
 impl SacaChar for u8 {}
-
 impl SacaChar for u32 {}
 
 /// Suffix array index type.

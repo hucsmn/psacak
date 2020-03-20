@@ -205,7 +205,7 @@ where
 
         // workspace.
         let mut suf_row = vec![TableCell::new("suf")];
-        let empty = I::ONE << (I::BIT_WIDTH - 1);
+        let empty = I::HIGHEST_BIT;
         suf.iter().for_each(|&i| {
             let val;
             if i == empty {
