@@ -4,8 +4,11 @@ use rayon::prelude::*;
 use super::common::*;
 use super::types::*;
 
-/// Threshold to disable parallel for little amount of lms-substrings.
+/// Threshold to disable parallel ranking for little amount of lms-substrings.
 const PARALLEL_RANK_THRESHOLD: usize = 32768;
+
+/// Threshold to disable parallel unranking for little amount of lms-substrings.
+const PARALLEL_UNRANK_THRESHOLD: usize = 32768;
 
 /// Get ranks of the sorted lms-substrings originally located in the head.
 ///
@@ -19,27 +22,6 @@ where
     I: SacaIndex,
 {
     rank_lmssubs_using::<C, I, DefaultLmsFingerprint>(text, suf, n)
-}
-
-/// Unrank sorted lms-suffixes in place, from the suffix array of subproblem in the head of workspace.
-#[inline]
-pub fn unrank_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
-where
-    C: SacaChar,
-    I: SacaIndex,
-{
-    // get the original problem in the tail of workspace.
-    let mut p = suf.len();
-    foreach_lmschars(text, |i, _| {
-        p -= 1;
-        suf[p] = I::from_index(i);
-    });
-
-    // permutate lms-substrings in place, using the suffix array of subproblem.
-    for i in 0..n {
-        let j = suf[i].as_index();
-        suf[i] = suf[suf.len() - n + j];
-    }
 }
 
 /// Fingerprints for comparison of lms-substrings.
@@ -96,19 +78,20 @@ where
     }
 
     // insert ranks of lms-substrings to work.
-    let mut k = 1;
-    let mut fp0 = FP::get(text, suf[0].as_index());
     let (lmssubs, work) = suf.split_at_mut(n);
+    let mut k = 1;
+    let mut x0 = lmssubs[0].as_index();
+    let mut fp0 = FP::get(text, x0);
     work.iter_mut().for_each(|p| *p = I::MAX);
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     for i in 1..n {
         let x1 = lmssubs[i].as_index();
-        let x0 = lmssubs[i - 1].as_index();
         let fp1 = FP::get(text, x1);
         if !FP::equals(text, x0, fp0, x1, fp1) {
             k += 1;
         }
         work[x1 / 2] = I::from_index(k - 1);
+        x0 = x1;
         fp0 = fp1;
     }
 
@@ -134,13 +117,13 @@ where
     I: SacaIndex,
     FP: Fingerprint<C>,
 {
-    let jobs = rayon::current_num_threads();
-    if n / jobs < PARALLEL_RANK_THRESHOLD {
+    if n < PARALLEL_RANK_THRESHOLD {
         return nonpar_rank_lmssubs_using::<C, I, FP>(text, suf, n);
     }
 
     // compare lms-substrings.
     let (lmssubs, work) = suf.split_at_mut(n);
+    let jobs = rayon::current_num_threads();
     let chunk_size = if (n - 1) % jobs == 0 {
         (n - 1) / jobs
     } else {
@@ -332,4 +315,64 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
         j += X::SIZE / C::SIZE;
         &text[i..p] == &text[j..q]
     }
+}
+
+/// Unrank sorted lms-suffixes in place, from the suffix array of subproblem in the head of workspace.
+#[inline]
+pub fn unrank_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    // get the original problem in the tail of workspace.
+    let mut p = suf.len();
+    foreach_lmschars(text, |i, _| {
+        p -= 1;
+        suf[p] = I::from_index(i);
+    });
+
+    // permutate lms-substrings in place, using the suffix array of subproblem.
+    permut_lmssufs(text, suf, n);
+}
+
+// permutate lms-substrings in place, using the suffix array of subproblem.
+#[cfg(not(feature = "parallel"))]
+#[inline(always)]
+fn permut_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    for i in 0..n {
+        let j = suf[i].as_index();
+        suf[i] = suf[suf.len() - n + j];
+    }
+}
+
+// permutate lms-substrings in place, using the suffix array of subproblem.
+#[cfg(feature = "parallel")]
+#[inline(always)]
+fn permut_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    if n < PARALLEL_UNRANK_THRESHOLD {
+        for i in 0..n {
+            let j = suf[i].as_index();
+            suf[i] = suf[suf.len() - n + j];
+        }
+        return;
+    }
+
+    let (permut, rest) = suf.split_at_mut(n);
+    let (_, lmschars) = rest.split_at_mut(rest.len() - n);
+    let jobs = rayon::current_num_threads();
+    let chunk_size = if n % jobs == 0 { n / jobs } else { n / jobs + 1 };
+    permut.par_chunks_mut(chunk_size).for_each(|chunk| {
+        for i in 0..chunk.len() {
+            let x = chunk[i].as_index();
+            chunk[i] = lmschars[x];
+        }
+    });
 }
