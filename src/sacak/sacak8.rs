@@ -5,9 +5,12 @@ use super::ranking::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
+pub const MAX_LENGTH: usize = (!0u32 - 1) as usize;
+
 /// SACA-K outer level sort algorithm for byte strings.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
+    assert!(text.len() <= MAX_LENGTH);
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {

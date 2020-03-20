@@ -35,6 +35,8 @@ impl_as! {
 /// Unsigned integers with basic arithmetic operations.
 pub trait Uint:
     Copy
+    + Sync
+    + Send
     + Eq
     + Ord
     + Debug

@@ -6,7 +6,7 @@ use super::types::*;
 const EMPTY: u32 = 1 << 31;
 
 /// SACA-K inner level sort algorithm for integer strings (alphabet size k).
-/// 
+///
 /// Assumes that for each c in text, c < k.
 #[inline]
 pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
@@ -46,7 +46,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 }
 
 /// Rewrite characters to their corresponding bucket pointers.
-/// 
+///
 /// The lexicographical order would keep unchanged.
 #[inline]
 fn make_buckets(text: &mut [u32], suf: &mut [u32], k: usize) {

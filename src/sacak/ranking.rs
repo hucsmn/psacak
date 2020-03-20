@@ -1,9 +1,17 @@
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 use super::common::*;
 use super::types::*;
+
+/// Threshold to disable parallel for little amount of lms-substrings.
+const PARALLEL_RANK_THRESHOLD: usize = 32768;
 
 /// Get ranks of the sorted lms-substrings originally located in the head.
 ///
 /// Then place these ranks to the tail of workspace.
+///
+/// Assumes that `n <= suf.len() / 2 < (I::MAX >> 1)`.
 #[inline]
 pub fn rank_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
@@ -13,21 +21,73 @@ where
     rank_lmssubs_using::<C, I, DefaultLmsFingerprint>(text, suf, n)
 }
 
-/// Defualt fingerprint type for lms-substring comparisons.
-pub type DefaultLmsFingerprint = UintFingerprint<u128>;
+/// Unrank sorted lms-suffixes in place, from the suffix array of subproblem in the head of workspace.
+#[inline]
+pub fn unrank_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+where
+    C: SacaChar,
+    I: SacaIndex,
+{
+    // get the original problem in the tail of workspace.
+    let mut p = suf.len();
+    foreach_lmschars(text, |i, _| {
+        p -= 1;
+        suf[p] = I::from_index(i);
+    });
 
-/// Fingerprint values of lms-substrings.
+    // permutate lms-substrings in place, using the suffix array of subproblem.
+    for i in 0..n {
+        let j = suf[i].as_index();
+        suf[i] = suf[suf.len() - n + j];
+    }
+}
+
+/// Fingerprints for comparison of lms-substrings.
 pub trait Fingerprint<C: SacaChar>: Copy + Eq {
     fn get(text: &[C], i: usize) -> Self;
     fn equals(text: &[C], i: usize, fpi: Self, j: usize, fpj: Self) -> bool;
 }
 
-/// Get ranks of the sorted lms-substrings originally located in the head,
-/// using customed fingerprint.
+/// Defualt fingerprint for lms-substring comparisons.
+pub type DefaultLmsFingerprint = UintFingerprint<u128>;
+
+/// Get ranks using customed fingerprint originally located in the head.
 ///
 /// Then place these ranks to the tail of workspace.
+///
+/// Assumes that `n <= suf.len() / 2 < (I::MAX >> 1)`.
+#[cfg(not(feature = "parallel"))]
 #[inline]
 pub fn rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+where
+    C: SacaChar,
+    I: SacaIndex,
+    FP: Fingerprint<C>,
+{
+    nonpar_rank_lmssubs_using::<C, I, FP>(text, suf, n)
+}
+
+/// Get ranks using customed fingerprint originally located in the head.
+///
+/// Then place these ranks to the tail of workspace.
+///
+/// Assumes that `n <= suf.len() / 2 < (I::MAX >> 1)`.
+#[cfg(feature = "parallel")]
+#[inline]
+pub fn rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+where
+    C: SacaChar,
+    I: SacaIndex,
+    FP: Fingerprint<C>,
+{
+    debug_assert!(n <= suf.len() / 2);
+    debug_assert!(suf.len() / 2 < (I::MAX >> 1).as_index());
+    par_rank_lmssubs_using::<C, I, FP>(text, suf, n)
+}
+
+/// Get ranks without parallel support.
+#[inline(always)]
+fn nonpar_rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex,
@@ -37,7 +97,7 @@ where
         return 0;
     }
 
-    // insert ranks of lms-substrings by their occurrence order in text.
+    // insert ranks of lms-substrings to work.
     let mut k = 1;
     let mut fp0 = FP::get(text, suf[0].as_index());
     let (lmssubs, work) = suf.split_at_mut(n);
@@ -67,26 +127,75 @@ where
     k
 }
 
-/// Unrank sorted lms-suffixes into the head of workspace,
-/// from the solved suffix array of subproblem in the head of workspace.
-#[inline]
-pub fn unrank_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+/// Get ranks in parallel.
+#[cfg(feature = "parallel")]
+#[inline(always)]
+fn par_rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex,
+    FP: Fingerprint<C>,
 {
-    // get the original problem in the tail of workspace.
-    let mut p = suf.len();
-    foreach_lmschars(text, |i, _| {
-        p -= 1;
-        suf[p] = I::from_index(i);
-    });
-
-    // permutate lms-substrings in place, using the suffix array of subproblem.
-    for i in 0..n {
-        let j = suf[i].as_index();
-        suf[i] = suf[suf.len() - n + j];
+    let jobs = rayon::current_num_threads();
+    if n / jobs < PARALLEL_RANK_THRESHOLD {
+        return nonpar_rank_lmssubs_using::<C, I, FP>(text, suf, n);
     }
+
+    // compare lms-substrings.
+    let (lmssubs, work) = suf.split_at_mut(n);
+    let chunk_size = if (n - 1) % jobs == 0 {
+        (n - 1) / jobs
+    } else {
+        (n - 1) / jobs + 1
+    };
+    work.iter_mut().for_each(|p| *p = I::MAX >> 1);
+    lmssubs[1..]
+        .par_chunks(chunk_size)
+        .enumerate()
+        .zip(work[1..n].par_chunks_mut(chunk_size))
+        .for_each(|((i, lmssubs_chunk), work_chunk)| {
+            let mut x0 = lmssubs[i * chunk_size].as_index();
+            let mut fp0 = FP::get(text, x0);
+            for j in 0..lmssubs_chunk.len() {
+                let x1 = lmssubs_chunk[j].as_index();
+                let fp1 = FP::get(text, x1);
+                if !FP::equals(text, x0, fp0, x1, fp1) {
+                    // set highest bit if two neighboring lms-substrings are different.
+                    work_chunk[j] |= !(I::MAX >> 1);
+                }
+                x0 = x1;
+                fp0 = fp1;
+            }
+        });
+
+    // insert ranks of lms-substrings to work.
+    let mut k = 1;
+    for i in 0..n {
+        let x = lmssubs[i].as_index();
+        let equals = work[i] & !(I::MAX >> 1) == I::ZERO;
+        if !equals {
+            k += 1;
+        }
+        if x / 2 < n {
+            // keep comparison results;
+            work[x / 2] = (work[x / 2] & !(I::MAX >> 1)) | (I::from_index(k - 1) & (I::MAX >> 1));
+        } else {
+            work[x / 2] = I::from_index(k - 1);
+        }
+    }
+
+    // compact ranks to the tail if needed.
+    if k < n {
+        let mut p = work.len();
+        for i in (0..work.len()).rev() {
+            let x = work[i] & (I::MAX >> 1);
+            if x != (I::MAX >> 1) {
+                p -= 1;
+                work[p] = x;
+            }
+        }
+    }
+    k
 }
 
 // Length of lms-substring as fingerprint.
@@ -143,9 +252,10 @@ impl<C: SacaChar> Fingerprint<C> for usize {
 /// together with lms-substring length.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct UintFingerprint<X: Uint> {
-    // length, including sentinel.
+    /// Length of lms-substring, including sentinel.
     len: usize,
-    // fingerprint of a short prefix of lms-substring.
+
+    /// Fingerprint value of a short prefix of lms-substring.
     fp: X,
 }
 
