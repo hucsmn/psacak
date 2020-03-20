@@ -17,21 +17,6 @@ where
     });
 }
 
-/// Test if character is s-typed.
-#[inline(always)]
-pub fn is_schar<C: SacaChar>(text: &[C], i: usize) -> bool {
-    let c = text[i];
-    for &next in text[i + 1..].iter() {
-        if c < next {
-            return true;
-        }
-        if c > next {
-            return false;
-        }
-    }
-    false
-}
-
 /// Character type.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct SacaCharType {

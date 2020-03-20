@@ -56,22 +56,22 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 #[inline]
 fn translate_text(text: &mut [u32], suf: &mut [u32], k: usize) {
     // calculate bucket pointers.
-    suf[..k].iter_mut().for_each(|p| *p = 0);
-    text.iter().for_each(|&c| suf[c.as_index()] += 1);
-    suf[..k].iter_mut().fold(0, |sum, p| {
+    suf[..k + 1].iter_mut().for_each(|p| *p = 0);
+    text.iter().for_each(|&c| suf[c as usize + 1] += 1);
+    suf[1..k + 1].iter_mut().fold(0, |sum, p| {
         *p += sum;
         *p
     });
 
     // translate characters to bucket pointers.
     foreach_typedchars_mut(text, |i, t, p| {
-        let c = p.as_index();
+        let c = *p as usize;
         if !t.stype {
             // l-type => bucket head.
-            *p = if c > 0 { suf[c - 1] } else { 0 };
-        } else {
+            *p = suf[c];
+        } else if t.stype {
             // s-type => bucket tail - 1.
-            *p = suf[c] - 1;
+            *p = suf[c + 1] - 1;
         }
     })
 }
@@ -82,7 +82,7 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     suf.iter_mut().for_each(|p| *p = EMPTY);
 
     foreach_lmschars(text, |i, c| {
-        let p = c.as_index();
+        let p = c as usize;
         if suf[p] < EMPTY {
             // right shift the borrowed chunk.
             let n = suf[p..].iter().take_while(|&&x| x < EMPTY).count();
@@ -129,14 +129,14 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     let mut prev = text.len();
     let mut m = 0;
     for i in (0..n).rev() {
-        let x = suf[i];
+        let x = suf[i] as usize;
         suf[i] = EMPTY;
 
-        let p = text[x.as_index()].as_index();
+        let p = text[x] as usize;
         if p != prev {
             m = 0;
         }
-        suf[p - m] = x;
+        suf[p - m] = x as u32;
         prev = p;
         m += 1;
     }
@@ -151,7 +151,7 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
 #[inline]
 fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     // the sentinel.
-    let p = text[text.len() - 1].as_index();
+    let p = text[text.len() - 1] as usize;
     if p + 1 < suf.len() && suf[p + 1] == EMPTY {
         suf[p] = from_counter(1);
         suf[p + 1] = u32::from_index(text.len() - 1);
@@ -162,15 +162,16 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = 0;
     while i < suf.len() {
         if suf[i] > 0 && suf[i] < EMPTY {
-            // text[suf[i]] is non-empty, and has a preceding character.
-            let j = (suf[i] - 1).as_index();
-            let clean = is_schar(text, suf[i].as_index()); // we need manually clean up lms.
-            if text[j] >= text[j + 1] {
-                // the preceding character is l-type.
-                let p = text[j].as_index();
+            // c1 is non-empty, and has a preceding character c0.
+            let j = (suf[i] - 1) as usize;
+            let c0 = text[j];
+            let c1 = text[j + 1];
+            let p = c0 as usize;
+            if c0 >= c1 {
+                // c0 is l-type.
                 if suf[p] < EMPTY {
                     // left shift the borrowed chunk.
-                    let n = suf[..=p].iter().rev().take_while(|&&x| x <= EMPTY).count();
+                    let n = suf[..p + 1].iter().rev().take_while(|&&x| x <= EMPTY).count();
                     suf.copy_within(p + 1 - n..p + 1, p - n);
                     suf[p] = EMPTY;
                     if i > p - n {
@@ -201,7 +202,13 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
                     }
                 }
 
-                if left_most || clean {
+                // manually clean up lms.
+                let mut ltype = true;
+                if j + 2 < text.len() {
+                    let c2 = text[j + 2];
+                    ltype = c1 > c2 || (c1 == c2 && i > c1 as usize);
+                }
+                if left_most || !ltype {
                     // only keep lml-suffixes if toggled left_most.
                     suf[i] = EMPTY;
                 }
@@ -236,11 +243,13 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
     let mut i = text.len() - 1;
     loop {
         if suf[i] > 0 && suf[i] < EMPTY {
-            // text[suf[i]] is non-empty, and has a preceding character.
-            let j = (suf[i] - 1).as_index();
-            if text[j] < text[j + 1] || (text[j] == text[j + 1] && text[j].as_index() > i) {
-                // the preceding character is s-type.
-                let p = text[j].as_index();
+            // c1 is non-empty, and has a preceding character c0.
+            let j = (suf[i] - 1) as usize;
+            let c0 = text[j];
+            let c1 = text[j + 1];
+            let p = c0 as usize;
+            if c0 < c1 || (c0 == c1 && i < p) {
+                // c0 is s-type.
                 if suf[p] < EMPTY {
                     // right shift the borrowed chunk.
                     let n = suf[p..].iter().take_while(|&&x| x < EMPTY).count();
@@ -356,7 +365,11 @@ mod tests {
     fn calc_sacak32(text: &[u32]) -> Vec<u32> {
         let (mut text, k) = reduce_alphabet(text);
         let mut suf = vec![0u32; text.len()];
-        sacak32(&mut text[..], &mut suf[..], k);
+        if k >= text.len() {
+            saca_tiny(&text[..], &mut suf[..]);
+        } else {
+            sacak32(&mut text[..], &mut suf[..], k);
+        }
         suf
     }
 

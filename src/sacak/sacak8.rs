@@ -55,10 +55,16 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.set_tail();
     suf.iter_mut().for_each(|p| *p = 0);
 
+    let mut c_prev = text[text.len() - 1];
+    let mut p = bkt[c_prev] as usize;
     foreach_lmschars(text, |i, c| {
-        let p = &mut bkt[c];
-        *p -= 1;
-        suf[p.as_index()] = u32::from_index(i);
+        if c != c_prev {
+            bkt[c_prev] = p as u32;
+            p = bkt[c] as usize;
+            c_prev = c;
+        }
+        p -= 1;
+        suf[p] = i as u32;
     });
 }
 
@@ -89,19 +95,26 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
     bkt.set_head();
 
     // the sentinel.
-    let p = &mut bkt[text[text.len() - 1]];
-    suf[p.as_index()] = u32::from_index(text.len() - 1);
-    *p += 1;
+    let mut prev_c0 = text[text.len() - 1];
+    let mut p = bkt[prev_c0] as usize;
+    suf[p] = (text.len() - 1) as u32;
+    p += 1;
 
     for i in 0..suf.len() {
         if suf[i] > 0 {
-            // non-empty, and has a preceding character.
-            let j = (suf[i] - 1).as_index();
-            let p = &mut bkt[text[j]];
-            if text[j] >= text[j + 1] {
-                // the preceding character is l-type.
-                suf[p.as_index()] = u32::from_index(j);
-                *p += 1;
+            // c1 is non-empty, and has a preceding character.
+            let j = (suf[i] - 1) as usize;
+            let c0 = text[j];
+            let c1 = text[j + 1];
+            if c0 != prev_c0 {
+                bkt[prev_c0] = p as u32;
+                p = bkt[c0] as usize;
+                prev_c0 = c0;
+            }
+            if c0 >= c1 {
+                // c0 is l-type.
+                suf[p] = j as u32;
+                p += 1;
                 if left_most {
                     // only keep lml-suffixes.
                     suf[i] = 0;
@@ -122,15 +135,23 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
 fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     bkt.set_tail();
 
+    let mut prev_c0 = 255;
+    let mut p = bkt[prev_c0] as usize;
     for i in (0..suf.len()).rev() {
         if suf[i] > 0 {
-            // non-empty, and has a preceding character.
-            let j = (suf[i] - 1).as_index();
-            let p = &mut bkt[text[j]];
-            if text[j] <= text[j + 1] && p.as_index() <= i {
-                // the preceding character is s-type.
-                *p -= 1;
-                suf[p.as_index()] = u32::from_index(j);
+            // c1 is non-empty, and has a preceding character c0.
+            let j = (suf[i] - 1) as usize;
+            let c0 = text[j];
+            let c1 = text[j];
+            if c0 != prev_c0 {
+                bkt[prev_c0] = p as u32;
+                p = bkt[c0] as usize;
+                prev_c0 = c0;
+            }
+            if c0 <= c1 && p <= i {
+                // c0 is s-type.
+                p -= 1;
+                suf[p] = j as u32;
                 if left_most {
                     // only keep lms-suffixes.
                     suf[i] = 0;
