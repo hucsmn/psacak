@@ -123,7 +123,7 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
 fn compact_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
     let mut n = 0;
     for i in 0..suf.len() {
-        if suf[i] < EMPTY {
+        if suf[i] > 0 && suf[i] < EMPTY {
             suf[n] = suf[i];
             n += 1;
         }
@@ -237,10 +237,6 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
             suf[i + n] = EMPTY;
         }
     }
-    if left_most {
-        // text[0..] is not a lml-suffix.
-        suf.iter_mut().filter(|p| **p == 0).for_each(|p| *p = EMPTY);
-    }
 }
 
 /// Induce s-suffixes (or lms-suffixes) from sorted l-suffixes (or lml-suffixes).
@@ -309,19 +305,7 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
             break;
         }
     }
-
-    // clean up bucket counters.
-    for i in (0..suf.len()).rev() {
-        if suf[i] > EMPTY {
-            let n = get_counter(suf[i]);
-            suf.copy_within(i - n..i, i - n + 1);
-            suf[i - n] = EMPTY;
-        }
-    }
-    if left_most {
-        // text[0..] is not a lms-suffix.
-        suf.iter_mut().filter(|p| **p == 0).for_each(|p| *p = EMPTY);
-    }
+    // no bucket pointers remaining, or do not need to clean up them.
 }
 
 #[inline(always)]
