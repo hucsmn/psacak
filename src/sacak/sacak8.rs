@@ -191,8 +191,8 @@ fn move_within<T: Copy>(slice: &mut [T], src: std::ops::Range<usize>, dest: usiz
 /// Byte string bucket pointers.
 struct Buckets {
     ptrs: [u32; 256],
-    lms_counts: [u32; 256],
-    cache: [u32; 257],
+    bounds: [u32; 257],
+    lmscnts: [u32; 256],
 }
 
 impl Buckets {
@@ -200,35 +200,37 @@ impl Buckets {
     pub fn new(text: &[u8]) -> Self {
         let mut bkt = Buckets {
             ptrs: [0; 256],
-            cache: [0; 257],
-            lms_counts: [0; 256],
+            bounds: [0; 257],
+            lmscnts: [0; 256],
         };
         foreach_typedchars(text, |_, t, c| {
-            bkt.cache[c as usize + 1] += 1;
+            bkt.bounds[c as usize + 1] += 1;
             if t.is_lms() {
-                bkt.lms_counts[c as usize] += 1;
+                bkt.lmscnts[c as usize] += 1;
             }
         });
-        bkt.cache[1..].iter_mut().fold(0, |sum, p| {
-            *p += sum;
-            *p
-        });
+        let mut p = 0;
+        for i in 1..257 {
+            let cnt = bkt.bounds[i];
+            bkt.bounds[i] += p;
+            p += cnt;
+        }
         bkt
     }
 
     #[inline(always)]
     pub fn set_head(&mut self) {
-        self.ptrs.copy_from_slice(&self.cache[..256]);
+        self.ptrs.copy_from_slice(&self.bounds[..256]);
     }
 
     #[inline(always)]
     pub fn set_tail(&mut self) {
-        self.ptrs.copy_from_slice(&self.cache[1..257]);
+        self.ptrs.copy_from_slice(&self.bounds[1..257]);
     }
 
     #[inline(always)]
     pub fn get_lms_count(&self, c: u8) -> usize {
-        self.lms_counts[c as usize] as usize
+        self.lmscnts[c as usize] as usize
     }
 }
 

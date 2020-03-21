@@ -52,11 +52,15 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 fn make_buckets(text: &mut [u32], suf: &mut [u32], k: usize) {
     // calculate bucket pointers.
     suf[..k + 1].iter_mut().for_each(|p| *p = 0);
-    text.iter().for_each(|&c| suf[c as usize + 1] += 1);
-    suf[1..k + 1].iter_mut().fold(0, |sum, p| {
-        *p += sum;
-        *p
-    });
+    for c in text.iter().cloned() {
+        suf[c as usize + 1] += 1;
+    }
+    let mut p = 0;
+    for i in 1..k + 1 {
+        let cnt = suf[i];
+        suf[i] += p;
+        p += cnt;
+    }
 
     // translate characters to bucket pointers.
     foreach_typedchars_mut(text, |i, t, p| {
@@ -388,15 +392,15 @@ mod tests {
     }
 
     fn reduce_alphabet(text: &[u32]) -> (Vec<u32>, usize) {
-        let mut dic = BTreeMap::new();
-        text.iter().for_each(|&c| {
-            dic.insert(c, 0);
-        });
+        let mut ranking = BTreeMap::new();
+        for c in text.iter().cloned() {
+            ranking.insert(c, 0);
+        }
         let mut k = 0;
-        for (_, v) in &mut dic {
-            *v = k;
+        for (_, rank) in &mut ranking {
+            *rank = k;
             k += 1;
         }
-        (text.iter().map(|c| *dic.get(c).unwrap() as u32).collect(), k)
+        (text.iter().map(|c| *ranking.get(c).unwrap() as u32).collect(), k)
     }
 }

@@ -6,15 +6,10 @@ where
     C: SacaChar,
     I: SacaIndex,
 {
-    suf[..text.len()]
-        .iter_mut()
-        .enumerate()
-        .for_each(|(i, p)| *p = I::from_index(i));
-    suf[..text.len()].sort_by(|&i, &j| {
-        let i = i.as_index();
-        let j = j.as_index();
-        Ord::cmp(&text[i..], &text[j..])
-    });
+    for i in 0..text.len() {
+        suf[i] = I::from_index(i);
+    }
+    suf[..text.len()].sort_by(|&i, &j| Ord::cmp(&text[i.as_index()..], &text[j.as_index()..]));
 }
 
 /// Character type.
