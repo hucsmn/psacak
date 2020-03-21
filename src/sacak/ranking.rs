@@ -1,4 +1,3 @@
-#[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
 use super::common::*;
@@ -35,23 +34,6 @@ pub type DefaultLmsFingerprint = UintFingerprint<u128>;
 /// Then place these ranks to the tail of workspace.
 ///
 /// Assumes that `n <= suf.len() / 2 < I::MAX / 2`.
-#[cfg(not(feature = "parallel"))]
-#[inline]
-pub fn rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
-where
-    C: SacaChar,
-    I: SacaIndex,
-    FP: Fingerprint<C>,
-{
-    nonpar_rank_lmssubs_using::<C, I, FP>(text, suf, n)
-}
-
-/// Get ranks using customed fingerprint originally located in the head.
-///
-/// Then place these ranks to the tail of workspace.
-///
-/// Assumes that `n <= suf.len() / 2 < I::MAX / 2`.
-#[cfg(feature = "parallel")]
 #[inline]
 pub fn rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
@@ -62,52 +44,8 @@ where
     par_rank_lmssubs_using::<C, I, FP>(text, suf, n)
 }
 
-/// Get ranks without parallel support.
-#[inline(always)]
-fn nonpar_rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
-where
-    C: SacaChar,
-    I: SacaIndex,
-    FP: Fingerprint<C>,
-{
-    if n == 0 {
-        return 0;
-    }
-
-    // insert ranks of lms-substrings to work.
-    let (lmssubs, work) = suf.split_at_mut(n);
-    let mut k = 1;
-    let mut x0 = lmssubs[0].as_index();
-    let mut fp0 = FP::get(text, x0);
-    work.iter_mut().for_each(|p| *p = I::MAX);
-    work[lmssubs[0].as_index() / 2] = I::ZERO;
-    for i in 1..n {
-        let x1 = lmssubs[i].as_index();
-        let fp1 = FP::get(text, x1);
-        if !FP::equals(text, x0, fp0, x1, fp1) {
-            k += 1;
-        }
-        work[x1 / 2] = I::from_index(k - 1);
-        x0 = x1;
-        fp0 = fp1;
-    }
-
-    // compact ranks to the tail if needed.
-    if k < n {
-        let mut p = work.len();
-        for i in (0..work.len()).rev() {
-            if work[i] != I::MAX {
-                p -= 1;
-                work[p] = work[i];
-            }
-        }
-    }
-    k
-}
-
 /// Get ranks in parallel.
-#[cfg(feature = "parallel")]
-#[inline(always)]
+#[inline]
 fn par_rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
@@ -170,6 +108,49 @@ where
             if x != I::LOWER_BITS {
                 p -= 1;
                 work[p] = x;
+            }
+        }
+    }
+    k
+}
+
+/// Get ranks with parallel disabled.
+#[inline]
+fn nonpar_rank_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+where
+    C: SacaChar,
+    I: SacaIndex,
+    FP: Fingerprint<C>,
+{
+    if n == 0 {
+        return 0;
+    }
+
+    // insert ranks of lms-substrings to work.
+    let (lmssubs, work) = suf.split_at_mut(n);
+    let mut k = 1;
+    let mut x0 = lmssubs[0].as_index();
+    let mut fp0 = FP::get(text, x0);
+    work.iter_mut().for_each(|p| *p = I::MAX);
+    work[lmssubs[0].as_index() / 2] = I::ZERO;
+    for i in 1..n {
+        let x1 = lmssubs[i].as_index();
+        let fp1 = FP::get(text, x1);
+        if !FP::equals(text, x0, fp0, x1, fp1) {
+            k += 1;
+        }
+        work[x1 / 2] = I::from_index(k - 1);
+        x0 = x1;
+        fp0 = fp1;
+    }
+
+    // compact ranks to the tail if needed.
+    if k < n {
+        let mut p = work.len();
+        for i in (0..work.len()).rev() {
+            if work[i] != I::MAX {
+                p -= 1;
+                work[p] = work[i];
             }
         }
     }
