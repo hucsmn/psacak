@@ -22,16 +22,14 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 
     // induce sort lms-substrings.
     put_lmschars(text, suf);
-    induce_lchars(text, suf, true);
-    induce_schars(text, suf, true);
+    induce_sort(text, suf, true);
     let n = compact_lmssubs(text, suf);
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = rank_lmssubs(text, suf, n);
 
+    // recursive sort lms-suffixes if needed.
     if k < n {
-        // order of lms-suffixes != order of lms-substrings.
-        // need to further sort the lms-suffixes.
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);
@@ -41,8 +39,7 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssufs(text, suf, n);
-    induce_lchars(text, suf, false);
-    induce_schars(text, suf, false);
+    induce_sort(text, suf, false);
 }
 
 /// Rewrite characters to their corresponding bucket pointers.
@@ -154,14 +151,11 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     }
 }
 
-/// Induce l-suffixes (or lml-suffixes) from sorted lms-suffixes.
-///
-/// Assumes that non lms-suffixes among the input `suf` have been reset as `EMPTY`.
-///
-/// Outputs the induced l-suffixes with the input lms-suffixes reset to `EMPTY`,
-/// or the induced lml-suffixes with all other suffixes reset to `EMPTY`.
+/// Induce sort s/lms-suffixes from sorted lms-suffixes.
 #[inline]
-fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
+fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
+    // stage 1. induce l/lml-suffixes from lms-suffixes.
+
     // the sentinel.
     let p = text[text.len() - 1] as usize;
     if p + 1 < suf.len() && suf[p + 1] == EMPTY {
@@ -214,7 +208,7 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
                     }
                 }
 
-                // manually clean up lms.
+                // manually clean up lms-suffixes.
                 let mut ltype = true;
                 if j + 2 < text.len() {
                     let c2 = text[j + 2];
@@ -237,17 +231,9 @@ fn induce_lchars(text: &[u32], suf: &mut [u32], left_most: bool) {
             suf[i + n] = EMPTY;
         }
     }
-}
 
-/// Induce s-suffixes (or lms-suffixes) from sorted l-suffixes (or lml-suffixes).
-///
-/// Assumes that non l-suffixes (or non lml-suffixes) among the input `suf`
-/// have been reset as `EMPTY`.
-///
-/// Outputs the induced s-suffixes together with the input l-suffixes,
-/// or the induced lms-suffixes with all other suffixes reset to `EMPTY`.
-#[inline]
-fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
+    // stage 2. induce s/lms-suffixes from l/lml-suffixes.
+
     let mut i = text.len() - 1;
     loop {
         if suf[i] > 0 && suf[i] < EMPTY {
@@ -305,7 +291,6 @@ fn induce_schars(text: &[u32], suf: &mut [u32], left_most: bool) {
             break;
         }
     }
-    // no bucket pointers remaining, or do not need to clean up them.
 }
 
 #[inline(always)]

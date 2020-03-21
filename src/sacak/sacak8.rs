@@ -23,16 +23,14 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort lms-substrings.
     put_lmschars(text, suf, &mut bkt);
-    induce_lchars(text, suf, &mut bkt, true);
-    induce_schars(text, suf, &mut bkt, true);
+    induce_sort(text, suf, &mut bkt, true);
     let n = compact_lmssubs(text, suf);
 
     // get ranks of lms-substrings into the tail of workspace.
     let k = rank_lmssubs(text, suf, n);
 
+    // recursive sort lms-suffixes if needed.
     if k < n {
-        // order of lms-suffixes != order of lms-substrings.
-        // need to further sort the lms-suffixes.
         {
             let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
             sacak32(subtext, subsuf, k);
@@ -42,8 +40,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssufs(text, suf, &mut bkt, n);
-    induce_lchars(text, suf, &mut bkt, false);
-    induce_schars(text, suf, &mut bkt, false);
+    induce_sort(text, suf, &mut bkt, false);
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
@@ -94,14 +91,11 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
     }
 }
 
-/// Induce l-suffixes (or lml-suffixes) from sorted lms-suffixes.
-///
-/// Assumes that non lms-suffixes among the input `suf` have been marked as zero.
-///
-/// Outputs the induced l-suffixes together with the input lms-suffixes,
-/// or the induced lml-suffixes with any other suffixes marked as zero.
+/// Induce sort s/lms-suffixes from sorted lms-suffixes.
 #[inline]
-fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
+fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
+    // stage 1. induce l/lml-suffixes from lms-suffixes.
+
     bkt.set_head();
 
     // the sentinel.
@@ -117,6 +111,7 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             let c0 = text[j];
             let c1 = text[j + 1];
             if c0 != prev_c0 {
+                // reduce cache misses when data is repetitive.
                 bkt[prev_c0] = p as u32;
                 p = bkt[c0] as usize;
                 prev_c0 = c0;
@@ -132,17 +127,9 @@ fn induce_lchars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             }
         }
     }
-}
 
-/// Induce s-suffixes (or lms-suffixes) from sorted l-suffixes (or lml-suffixes).
-///
-/// Assumes that non l-suffixes (or non lml-suffixes) among input `suf`
-/// have been marked as zero.
-///
-/// Outputs the induced s-suffixes together with the input l-suffixes,
-/// or the induced lms-suffixes with any other suffixes marked as zero.
-#[inline]
-fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
+    // stage 2. induce s/lms-suffixes from l/lml-suffixes.
+
     bkt.set_tail();
 
     let mut prev_c0 = 255;
@@ -154,6 +141,7 @@ fn induce_schars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: boo
             let c0 = text[j];
             let c1 = text[j];
             if c0 != prev_c0 {
+                // reduce cache misses when data is repetitive.
                 bkt[prev_c0] = p as u32;
                 p = bkt[c0] as usize;
                 prev_c0 = c0;
