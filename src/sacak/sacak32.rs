@@ -1,15 +1,15 @@
 use super::common::*;
-use super::ranking::*;
+use super::naming::*;
 use super::types::*;
 
 /// Empty symbol in workspace.
 const EMPTY: u32 = 1 << 31;
 
-/// SACA-K inner level sort algorithm for integer strings (alphabet size k).
+/// Inner level of SACA-K for integer strings.
 ///
-/// Assumes that for each c in text, c < k.
+/// Assumes that characters are correctly translated to represent their bucket pointers.
 #[inline]
-pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
+pub fn sacak32(text: &[u32], suf: &mut [u32]) {
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {
@@ -17,59 +17,30 @@ pub fn sacak32(text: &mut [u32], suf: &mut [u32], k: usize) {
         return;
     }
 
-    // make buckets by rewriting text.
-    make_buckets(text, suf, k);
-
     // induce sort lms-substrings.
     put_lmschars(text, suf);
     induce_sort(text, suf, true);
     let n = compact_lmssubs(text, suf);
 
-    // get ranks of lms-substrings into the tail of workspace.
-    let k = rank_lmssubs(text, suf, n);
-
-    // recursive sort lms-suffixes if needed.
+    // construct subproblem from sorted lms-substrings,
+    // then compute its suffix array.
+    let k = name_lmssubs(text, suf, n);
     if k < n {
-        {
-            let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
-            sacak32(subtext, subsuf, k);
+        // need to solve the subproblem recursively.
+        let (suf1, text1) = suf.split_at_mut(suf.len() - n);
+        sacak32(text1, suf1);
+    } else {
+        // the subproblem itself is the inversed suffix array.
+        let (suf1, text1) = suf.split_at_mut(suf.len() - n);
+        for i in 0..n {
+            suf1[text1[i].as_index()] = i as u32;
         }
-        unrank_lmssufs(text, suf, n);
     }
+    permut_lmssufs(text, suf, n);
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssufs(text, suf, n);
     induce_sort(text, suf, false);
-}
-
-/// Rewrite characters to their corresponding bucket pointers.
-///
-/// The lexicographical order would keep unchanged.
-#[inline]
-fn make_buckets(text: &mut [u32], suf: &mut [u32], k: usize) {
-    // calculate bucket pointers.
-    suf[..k + 1].iter_mut().for_each(|p| *p = 0);
-    for c in text.iter().cloned() {
-        suf[c as usize + 1] += 1;
-    }
-    let mut p = 0;
-    for i in 1..k + 1 {
-        let cnt = suf[i];
-        suf[i] += p;
-        p += cnt;
-    }
-
-    // translate characters to bucket pointers.
-    foreach_typedchars_mut(text, |i, t, p| {
-        let c = *p as usize;
-        if !t.stype {
-            // l-type => bucket head.
-            *p = suf[c];
-        } else if t.stype {
-            // s-type => bucket tail - 1.
-            *p = suf[c + 1] - 1;
-        }
-    })
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
@@ -115,9 +86,10 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     }
 }
 
-/// Compact the sorted lms-substrings into the head of workspace.
+/// Compact the sorted lms-substrings into head of workspace.
 #[inline]
 fn compact_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
+    // TODO: simd
     let mut n = 0;
     for i in 0..suf.len() {
         if suf[i] > 0 && suf[i] < EMPTY {
@@ -128,7 +100,7 @@ fn compact_lmssubs(text: &[u32], suf: &mut [u32]) -> usize {
     n
 }
 
-/// Put the sorted lms-suffixes, originally located in the head of workspace,
+/// Put the sorted lms-suffixes, originally located in head of workspace,
 /// to their corresponding bucket tails.
 #[inline]
 fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
@@ -306,7 +278,7 @@ fn to_counter(n: usize) -> u32 {
 // tests for sacak32.
 #[cfg(test)]
 mod tests {
-    use super::super::common::saca_tiny;
+    use super::super::common::*;
     use super::super::types::*;
     use super::sacak32;
     use std::collections::BTreeMap;
@@ -349,7 +321,8 @@ mod tests {
         if k >= text.len() {
             saca_tiny(&text[..], &mut suf[..]);
         } else {
-            sacak32(&mut text[..], &mut suf[..], k);
+            translate_text(&mut text[..], &mut suf[..], k);
+            sacak32(&text[..], &mut suf[..]);
         }
         suf
     }
@@ -371,5 +344,27 @@ mod tests {
             k += 1;
         }
         (text.iter().map(|c| *ranking.get(c).unwrap() as u32).collect(), k)
+    }
+
+    fn translate_text(text: &mut [u32], suf: &mut [u32], k: usize) {
+        suf[..k + 1].iter_mut().for_each(|p| *p = 0);
+        for c in text.iter().cloned() {
+            suf[c as usize + 1] += 1;
+        }
+        let mut p = 0;
+        for i in 1..k + 1 {
+            let cnt = suf[i];
+            suf[i] += p;
+            p += cnt;
+        }
+
+        foreach_typedchars_mut(text, |i, t, p| {
+            let c = *p as usize;
+            if !t.stype {
+                *p = suf[c];
+            } else if t.stype {
+                *p = suf[c + 1] - 1;
+            }
+        })
     }
 }

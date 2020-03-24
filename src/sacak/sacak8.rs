@@ -1,13 +1,13 @@
 use std::ops::{Index, IndexMut};
 
 use super::common::*;
-use super::ranking::*;
+use super::naming::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
 pub const MAX_LENGTH: usize = (!0u32 - 1) as usize;
 
-/// SACA-K outer level sort algorithm for byte strings.
+/// Initial level of SACA-K for byte strings.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     assert!(text.len() <= MAX_LENGTH);
@@ -26,17 +26,21 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     induce_sort(text, suf, &mut bkt, true);
     let n = compact_lmssubs(text, suf);
 
-    // get ranks of lms-substrings into the tail of workspace.
-    let k = rank_lmssubs(text, suf, n);
-
-    // recursive sort lms-suffixes if needed.
+    // construct subproblem from sorted lms-substrings,
+    // then compute its suffix array.
+    let k = name_lmssubs(text, suf, n);
     if k < n {
-        {
-            let (subsuf, subtext) = suf.split_at_mut(suf.len() - n);
-            sacak32(subtext, subsuf, k);
+        // need to solve the subproblem recursively.
+        let (suf1, text1) = suf.split_at_mut(suf.len() - n);
+        sacak32(text1, suf1);
+    } else {
+        // the subproblem itself is the inversed suffix array.
+        let (suf1, text1) = suf.split_at_mut(suf.len() - n);
+        for i in 0..n {
+            suf1[text1[i].as_index()] = i as u32;
         }
-        unrank_lmssufs(text, suf, n);
     }
+    permut_lmssufs(text, suf, n);
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssufs(text, suf, &mut bkt, n);
@@ -62,9 +66,10 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     });
 }
 
-/// Compact the sorted lms-substrings into the head of workspace.
+/// Compact the sorted lms-substrings into head of workspace.
 #[inline]
 fn compact_lmssubs(text: &[u8], suf: &mut [u32]) -> usize {
+    // TODO: simd
     let mut n = 0;
     for i in 0..suf.len() {
         if suf[i] > 0 {
@@ -75,7 +80,7 @@ fn compact_lmssubs(text: &[u8], suf: &mut [u32]) -> usize {
     n
 }
 
-/// Put the sorted lms-suffixes, originally located in the head of workspace,
+/// Put the sorted lms-suffixes, originally located in head of workspace,
 /// to their corresponding bucket tails.
 #[inline]
 fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {

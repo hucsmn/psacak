@@ -121,7 +121,8 @@ macro_rules! inspect_here {
     ($( $fmt:expr $( , $args:expr )* );* => text: $text:expr $(, $ptr:expr)*) => {
         if cfg!(debug_assertions) {
             $( eprintln!($fmt $(, $args)*); )*
-            inspect($text, &[], &[$($ptr ,)*]);
+            let suf: &[u32] = &[];
+            inspect($text, suf, &[$($ptr ,)*]);
         }
     };
     ($( $fmt:expr $( , $args:expr )* );* => suf: $suf:expr $(, $ptr:expr)*) => {
