@@ -1,9 +1,9 @@
 use std::mem::size_of;
 
 use std::fmt::{Debug, Display};
-use std::num::{NonZeroU128, NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8, NonZeroUsize};
 use std::ops::{Add, BitAnd, BitOr, BitXor, Not, Shl, Shr, Sub};
 use std::ops::{AddAssign, BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign, SubAssign};
+use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 // Cheap unsigned integer cast.
 pub trait As<T: Copy>: Copy {
@@ -39,6 +39,7 @@ pub trait Uint:
     + Send
     + Eq
     + Ord
+    + Default
     + Debug
     + Display
     + ToString
@@ -119,6 +120,96 @@ macro_rules! impl_uint {
 
 impl_uint!(u8, u16, u32, u64, u128, usize);
 
+/// Mark unsigned integer type has atomic version.
+pub trait HasAtomic: Uint {
+    type Atomic: Atomic<Self> + From<Self>;
+}
+
+/// Atomic unsigned integers.
+pub trait Atomic<T: Uint>: Sync + Send + Debug {
+    fn new(val: T) -> Self;
+    fn get_mut(&mut self) -> &mut T;
+    fn into_inner(self) -> T;
+
+    fn load(&self, order: Ordering) -> T;
+    fn store(&self, val: T, order: Ordering);
+    fn swap(&self, val: T, order: Ordering) -> T;
+    fn compare_and_swap(&self, current: T, new: T, order: Ordering) -> T;
+    fn compare_exchange(&self, current: T, new: T, success: Ordering, failure: Ordering) -> Result<T, T>;
+    fn compare_exchange_weak(&self, current: T, new: T, success: Ordering, failure: Ordering) -> Result<T, T>;
+
+    fn fetch_add(&self, val: T, order: Ordering) -> T;
+    fn fetch_sub(&self, val: T, order: Ordering) -> T;
+    fn fetch_and(&self, val: T, order: Ordering) -> T;
+    fn fetch_nand(&self, val: T, order: Ordering) -> T;
+    fn fetch_or(&self, val: T, order: Ordering) -> T;
+    fn fetch_xor(&self, val: T, order: Ordering) -> T;
+}
+
+macro_rules! forward_binops_for_impl_atomic {
+    ($uint:ident $atomic:ident => $($method:ident),*) => {
+        $(
+            #[inline(always)]
+            fn $method(&self, val: $uint, order: Ordering) -> $uint {
+                $atomic::$method(self, val, order)
+            }
+        )*
+    };
+}
+
+macro_rules! impl_atomic {
+    ($($uint:ident $atomic:ident),*) => {
+        $(
+            impl HasAtomic for $uint {
+                type Atomic = $atomic;
+            }
+            impl Atomic<$uint> for $atomic {
+                #[inline(always)]
+                fn new(val: $uint) -> Self {
+                    $atomic::new(val)
+                }
+                #[inline(always)]
+                fn get_mut(&mut self) -> &mut $uint {
+                    $atomic::get_mut(self)
+                }
+                #[inline(always)]
+                fn into_inner(self) -> $uint {
+                    $atomic::into_inner(self)
+                }
+
+                #[inline(always)]
+                fn load(&self, order: Ordering) -> $uint {
+                    $atomic::load(self, order)
+                }
+                #[inline(always)]
+                fn store(&self, val: $uint, order: Ordering) {
+                    $atomic::store(self, val, order);
+                }
+                #[inline(always)]
+                fn swap(&self, val: $uint, order: Ordering) -> $uint {
+                    $atomic::swap(self, val, order)
+                }
+                #[inline(always)]
+                fn compare_and_swap(&self, current: $uint, new: $uint, order: Ordering) -> $uint {
+                    $atomic::compare_and_swap(self, current, new, order)
+                }
+                #[inline(always)]
+                fn compare_exchange(&self, current: $uint, new: $uint, success: Ordering, failure: Ordering) -> Result<$uint, $uint> {
+                    $atomic::compare_exchange(self, current, new, success, failure)
+                }
+                #[inline(always)]
+                fn compare_exchange_weak(&self, current: $uint, new: $uint, success: Ordering, failure: Ordering) -> Result<$uint, $uint> {
+                    $atomic::compare_exchange_weak(self, current, new, success, failure)
+                }
+
+                forward_binops_for_impl_atomic!($uint $atomic => fetch_add, fetch_sub, fetch_and, fetch_nand, fetch_or, fetch_xor);
+            }
+        )*
+    };
+}
+
+impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, u64 AtomicU64, usize AtomicUsize);
+
 /// Types that could be casted into usize.
 pub trait AsIndex: Copy {
     fn as_index(self) -> usize;
@@ -140,13 +231,13 @@ macro_rules! impl_as_index {
 impl_as_index!(u8, u16, u32, usize);
 
 /// Text character type.
-pub trait SacaChar: Uint + AsIndex {}
+pub trait SacaChar: Uint + HasAtomic + AsIndex {}
 
 impl SacaChar for u8 {}
 impl SacaChar for u32 {}
 
 /// Suffix array index type.
-pub trait SacaIndex: Uint + AsIndex {
+pub trait SacaIndex: Uint + HasAtomic + AsIndex {
     fn from_index(idx: usize) -> Self;
 }
 
