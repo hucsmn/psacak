@@ -1,6 +1,7 @@
 use std::ops::{Index, IndexMut};
 
 use super::common::*;
+use super::compact::*;
 use super::naming::*;
 use super::sacak32::sacak32;
 use super::types::*;
@@ -24,7 +25,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     // induce sort lms-substrings.
     put_lmschars(text, suf, &mut bkt);
     induce_sort(text, suf, &mut bkt, true);
-    let n = compact_lmssubs(text, suf);
+    let n = compact_exclude(suf, 0, false);
 
     // construct subproblem from sorted lms-substrings,
     // then compute its suffix array.
@@ -64,20 +65,6 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
         p -= 1;
         suf[p] = i as u32;
     });
-}
-
-/// Compact the sorted lms-substrings into head of workspace.
-#[inline]
-fn compact_lmssubs(text: &[u8], suf: &mut [u32]) -> usize {
-    // TODO: simd
-    let mut n = 0;
-    for i in 0..suf.len() {
-        if suf[i] > 0 {
-            suf[n] = suf[i];
-            n += 1;
-        }
-    }
-    n
 }
 
 /// Put the sorted lms-suffixes, originally located in head of workspace,

@@ -4,22 +4,32 @@ use std::sync::atomic::{fence, AtomicU16, AtomicU32, AtomicU64, AtomicU8, Atomic
 use rayon::prelude::*;
 
 use super::common::*;
+use super::compact::*;
 use super::types::*;
 
-/// Threshold for paralleled lms-substrings naming.
-const PARALLEL_RANK_THRESHOLD: usize = 256;
+/// Threshold to name lms-substrings in parallel.
+const PARALLEL_NAME_THRESHOLD: usize = 256;
 
-/// Name sorted lms-substrings in head, then produce subproblem in tail of workspace.
+/// Fingerprints for lms-substrings comparison.
+pub trait Fingerprint<C: SacaChar>: Copy + Eq {
+    fn get(text: &[C], i: usize) -> Self;
+    fn equals(text: &[C], i: usize, fpi: Self, j: usize, fpj: Self) -> bool;
+}
+
+/// Defualt fingerprint type for lms-substring comparisons.
+pub type DefaultFingerprint = UintFingerprint<u128>;
+
+/// Name sorted lms-substrings in head of workspace, then produce subproblem in tail.
 #[inline]
 pub fn name_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
 {
-    name_lmssubs_using::<C, I, DefaultLmsFingerprint>(text, suf, n)
+    name_lmssubs_using::<C, I, DefaultFingerprint>(text, suf, n)
 }
 
-/// Name sorted lms-substrings in head, then produce subproblem in tail of workspace,
+/// Name sorted lms-substrings in head of workspace, then produce subproblem in tail,
 /// using customed fingerprint type.
 #[inline]
 pub fn name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
@@ -28,21 +38,21 @@ where
     I: SacaIndex + SacaChar,
     FP: Fingerprint<C>,
 {
-    if n < PARALLEL_RANK_THRESHOLD {
-        // serial version.
-        nonpar_make_subproblem_using::<C, I, FP>(text, suf, n)
+    if n < PARALLEL_NAME_THRESHOLD || n < rayon::current_num_threads() + 1 {
+        // serial version, for small amount of lms-substrings.
+        nonpar_name_lmssubs_using::<C, I, FP>(text, suf, n)
     } else if text.len() <= I::LOWER_BITS.as_index() {
-        // store difference bit vector in the highest bit of lms-substrings.
-        fast_par_make_subproblem_using::<C, I, FP>(text, suf, n)
+        // faster version, only works when lms-substrings <= I::MAX/2.
+        fastpar_name_lmssubs_using::<C, I, FP>(text, suf, n)
     } else {
-        // store difference bit vector in workspace.
-        fallback_par_make_subproblem_using::<C, I, FP>(text, suf, n)
+        // fallback version, runs slower to avoid data race.
+        par_name_lmssubs_using::<C, I, FP>(text, suf, n)
     }
 }
 
-/// Construct subproblem in serial, using customed fingerprint type.
+/// Name sorted lms-substrings in serial, using customed fingerprint type.
 #[inline]
-fn nonpar_make_subproblem_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+fn nonpar_name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
@@ -52,21 +62,20 @@ where
         return 0;
     }
     let (lmssubs, work) = suf.split_at_mut(n);
-    work.iter_mut().for_each(|p| *p = I::MAX);
 
-    // compare neighboring lms-substrings,
-    // and compute the interim subproblem and its bucket boundaries in place.
+    // compare lms-substrings, make the interim subproblem, and get buckets.
     let mut k = 0;
     let mut h = 0;
     let mut m = 1;
     let mut i0 = lmssubs[0].as_index();
     let mut fp0 = FP::get(text, i0);
+    work.iter_mut().for_each(|p| *p = I::MAX);
     work[i0 / 2] = I::ZERO;
     for i in 1..n {
         let i1 = lmssubs[i].as_index();
         let fp1 = FP::get(text, i1);
         if !FP::equals(text, i0, fp0, i1, fp1) {
-            // store bucket tails in place.
+            // store bucket tails in suf[..k].
             lmssubs[k] = I::from_index(h + m);
             k += 1;
             h += m;
@@ -80,45 +89,28 @@ where
     lmssubs[k] = I::from_index(h + m);
     k += 1;
 
-    // compact the interim subproblem to tail.
-    let mut p = work.len();
-    for i in (0..work.len()).rev() {
-        if work[i] != I::MAX {
-            p -= 1;
-            work[p] = work[i];
-        }
-    }
-
-    // translate characters to bucket pointers.
-    foreach_typedchars_mut(&mut work[p..], |i, t, p| {
-        let c = p.as_index();
-        if !t.stype {
-            // l-type => bucket head.
-            *p = if c == 0 { I::ZERO } else { lmssubs[c - 1] };
-        } else if t.stype {
-            // s-type => bucket tail - 1.
-            *p = lmssubs[c] - I::ONE;
-        }
-    });
-
+    // compact the interim subproblem, and translate characters.
+    let p = work.len() - n;
+    compact_exclude(work, I::MAX, true);
+    translate(&mut work[p..], &lmssubs[..k]);
     k
 }
 
-/// Fallback subproblem construction in parallel, using customed fingerprint type.
+/// Name sorted lms-substrings partially in parallel, using customed fingerprint type.
 #[inline]
-fn fallback_par_make_subproblem_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+fn par_name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
     FP: Fingerprint<C>,
 {
     let jobs = rayon::current_num_threads();
-    let chunk_size = ceil_divide(n - 1, jobs);
 
     // compare lms-substrings in parallel.
     let (lmssubs, work) = suf.split_at_mut(n);
-    work.par_chunks_mut(ceil_divide(n, jobs))
+    work.par_chunks_mut(ceil_divide(work.len(), jobs))
         .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = I::LOWER_BITS));
+    let chunk_size = ceil_divide(n - 1, jobs);
     lmssubs[1..]
         .par_chunks(chunk_size)
         .zip(work[1..n].par_chunks_mut(chunk_size))
@@ -130,7 +122,7 @@ where
                 let i1 = lmssubs_chunk[j].as_index();
                 let fp1 = FP::get(text, i1);
                 if !FP::equals(text, i0, fp0, i1, fp1) {
-                    // set highest bit in workspace, if two neighboring lms-substrings are different.
+                    // store difference bit in suf[n..2*n].
                     work_chunk[j] |= I::HIGHEST_BIT;
                 }
                 i0 = i1;
@@ -138,14 +130,14 @@ where
             }
         });
 
-    // compute the interim subproblem and its bucket boundaries in place.
+    // make the interim subproblem, and get buckets.
     let mut k = 0;
     let mut h = 0;
     let mut m = 0;
     for i in 0..n {
         let x = lmssubs[i].as_index();
         if work[i] & I::HIGHEST_BIT != I::ZERO {
-            // store bucket tails in place.
+            // store bucket tails in suf[..k].
             lmssubs[k] = I::from_index(h + m);
             k += 1;
             h += m;
@@ -154,44 +146,32 @@ where
         m += 1;
         let j = x / 2;
         if j < n {
-            // preserve equality bit.
-            work[j] = (work[j] & I::HIGHEST_BIT) | (I::from_index(k) & I::LOWER_BITS);
+            // preserve difference bits.
+            work[j] &= I::HIGHEST_BIT;
+            work[j] |= I::from_index(k) & I::LOWER_BITS;
         } else {
+            // k <= I::LOWER_BITS.
             work[j] = I::from_index(k);
         }
     }
     lmssubs[k] = I::from_index(h + m);
     k += 1;
 
-    // compact the interim subproblem to tail.
-    let mut p = work.len();
-    for i in (0..work.len()).rev() {
-        let x = work[i] & I::LOWER_BITS;
-        // k cannot be I::LOWER_BITS, if the initial level of SACA-K use u32 or u64 index.
-        if x != I::LOWER_BITS {
-            p -= 1;
-            work[p] = x;
-        }
-    }
+    // clean up the difference bits in suf[n..2*n].
+    work[..n]
+        .par_chunks_mut(ceil_divide(n, jobs))
+        .for_each(|chunk| chunk.iter_mut().for_each(|p| *p &= I::LOWER_BITS));
 
-    // translate characters to bucket pointers.
-    foreach_typedchars_mut(&mut work[p..], |i, t, p| {
-        let c = p.as_index();
-        if !t.stype {
-            // l-type => bucket head.
-            *p = if c == 0 { I::ZERO } else { lmssubs[c - 1] };
-        } else if t.stype {
-            // s-type => bucket tail - 1.
-            *p = lmssubs[c] - I::ONE;
-        }
-    });
-
+    // compact the interim subproblem, and translate characters.
+    let p = work.len() - n;
+    compact_exclude(work, I::LOWER_BITS, true);
+    translate(&mut work[p..], &lmssubs[..k]);
     k
 }
 
-/// Fast subproblem construction in parallel, using customed fingerprint type.
+/// Name lms-substrings in parallel, using customed fingerprint type.
 #[inline]
-fn fast_par_make_subproblem_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+fn fastpar_name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
@@ -200,10 +180,10 @@ where
     debug_assert!(text.len() <= I::LOWER_BITS.as_index());
 
     let jobs = rayon::current_num_threads();
-    let chunk_size = ceil_divide(n - 1, jobs);
 
-    // compare lms-substrings in parallel, with a tiny space overhead (2 * jobs * I::SIZE).
+    // compare lms-substrings in parallel, allocating `2 * jobs * I::SIZE` extra space.
     let (lmssubs, work) = suf.split_at_mut(n);
+    let chunk_size = ceil_divide(n - 1, jobs);
     let i0s = (0..jobs)
         .into_iter()
         .map(|i| lmssubs[i * chunk_size])
@@ -212,21 +192,21 @@ where
         .par_chunks_mut(chunk_size)
         .zip(i0s.into_par_iter())
         .map(|(chunk, i0)| {
-            let mut k = I::ZERO;
+            let mut k0 = I::ZERO;
             let mut i0 = i0.as_index();
             let mut fp0 = FP::get(text, i0);
             for i in 0..chunk.len() {
                 let i1 = chunk[i].as_index();
                 let fp1 = FP::get(text, i1);
                 if !FP::equals(text, i0, fp0, i1, fp1) {
-                    // set highest bit in place, if two neighboring lms-substrings are different.
+                    // directly store difference bit in suf[..n].
                     chunk[i] |= I::HIGHEST_BIT;
-                    k += I::ONE;
+                    k0 += I::ONE;
                 }
                 i0 = i1;
                 fp0 = fp1;
             }
-            k
+            k0
         })
         .collect::<Vec<_>>();
     k0s.iter_mut().fold(I::ZERO, |k0, k| {
@@ -236,11 +216,11 @@ where
     });
 
     // compute the interim subproblem in parallel.
-    work.par_chunks_mut(ceil_divide(n, jobs))
+    work.par_chunks_mut(ceil_divide(work.len(), jobs))
         .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = I::MAX));
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     {
-        let work = WriteOnlyAtomicSlice::new(work);
+        let work = WriteOnceAtomicSlice::new(work);
         lmssubs[1..]
             .par_chunks(chunk_size)
             .zip(k0s.into_par_iter())
@@ -251,21 +231,21 @@ where
                     if chunk[i] & I::HIGHEST_BIT != I::ZERO {
                         k += 1;
                     }
-                    unsafe {
-                        // it can be proved that any element would be written at most once.
-                        work.set((chunk[i] & I::LOWER_BITS).as_index() / 2, I::from_index(k));
-                    }
+                    // provable: it writes at most once for each element.
+                    work.set((chunk[i] & I::LOWER_BITS).as_index() / 2, I::from_index(k));
                 }
+                // force globally visible.
+                work.fence();
             });
     }
 
-    // compute the bucket boundaries in place.
+    // get buckets.
     let mut k = 0;
     let mut h = 0;
     let mut m = 0;
     for i in 0..n {
         if lmssubs[i] & I::HIGHEST_BIT != I::ZERO {
-            // store bucket tails in place.
+            // store bucket tails in suf[..k].
             lmssubs[k] = I::from_index(h + m);
             k += 1;
             h += m;
@@ -276,32 +256,29 @@ where
     lmssubs[k] = I::from_index(h + m);
     k += 1;
 
-    // compact the interim subproblem to tail.
-    let mut p = work.len();
-    for i in (0..work.len()).rev() {
-        let x = work[i] & I::LOWER_BITS;
-        if x != I::LOWER_BITS {
-            p -= 1;
-            work[p] = x;
-        }
-    }
-
-    // translate characters to bucket pointers.
-    foreach_typedchars_mut(&mut work[p..], |i, t, p| {
-        let c = p.as_index();
-        if !t.stype {
-            // l-type => bucket head.
-            *p = if c == 0 { I::ZERO } else { lmssubs[c - 1] };
-        } else if t.stype {
-            // s-type => bucket tail - 1.
-            *p = lmssubs[c] - I::ONE;
-        }
-    });
-
+    // compact the interim subproblem, and translate characters.
+    let p = work.len() - n;
+    compact_exclude(work, I::MAX, true);
+    translate(&mut work[p..], &lmssubs[..k]);
     k
 }
 
-/// Calculate `⌈x/y⌉`.
+/// Preprocess the interim subproblem by translating characters to bucket pointers.
+#[inline]
+fn translate<I: SacaIndex + SacaChar>(text: &mut [I], bkt_tails: &[I]) {
+    foreach_typedchars_mut(text, |i, t, p| {
+        let c = p.as_index();
+        if !t.stype {
+            // l-type => bucket head.
+            *p = if c == 0 { I::ZERO } else { bkt_tails[c - 1] };
+        } else if t.stype {
+            // s-type => bucket tail - 1.
+            *p = bkt_tails[c] - I::ONE;
+        }
+    });
+}
+
+/// Calculate `ceil(x/y)`.
 #[inline(always)]
 fn ceil_divide(x: usize, y: usize) -> usize {
     if x != 0 {
@@ -311,16 +288,7 @@ fn ceil_divide(x: usize, y: usize) -> usize {
     }
 }
 
-/// Fingerprints for comparison of lms-substrings.
-pub trait Fingerprint<C: SacaChar>: Copy + Eq {
-    fn get(text: &[C], i: usize) -> Self;
-    fn equals(text: &[C], i: usize, fpi: Self, j: usize, fpj: Self) -> bool;
-}
-
-/// Defualt fingerprint for lms-substring comparisons.
-pub type DefaultLmsFingerprint = UintFingerprint<u128>;
-
-// Length of lms-substring as fingerprint.
+// Lengths of lms-substrings as legacy fingerprints.
 impl<C: SacaChar> Fingerprint<C> for usize {
     /// Calculate the length of lms-substring (probably contains sentinel).
     #[inline(always)]
@@ -331,22 +299,20 @@ impl<C: SacaChar> Fingerprint<C> for usize {
 
         let mut n = 1;
 
-        // upslope and plateau.
         while i + n < text.len() && text[i + n] >= text[i + n - 1] {
             n += 1;
         }
 
-        // downslope and valley.
         while i + n < text.len() && text[i + n] <= text[i + n - 1] {
             n += 1;
         }
 
-        // include sentinel.
+        // include the sentinel.
         if i + n == text.len() {
             return n + 1;
         }
 
-        // exclude the trailing part of valley.
+        // exclude the redundant trailing s-characters.
         while n > 0 && text[i + n - 1] == text[i + n - 2] {
             n -= 1;
         }
@@ -370,14 +336,15 @@ impl<C: SacaChar> Fingerprint<C> for usize {
     }
 }
 
-/// Fingerprint of a short prefix of the lms-substring storing in a big integer,
-/// together with lms-substring length.
+/// Fingerprint that stores a short prefix of the lms-substring in a big integer.
+/// 
+/// In most cases, lms-substrings are very short.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct UintFingerprint<X: Uint> {
-    /// Length of lms-substring, including sentinel.
+    /// Length of lms-substring, including the sentinel.
     len: usize,
 
-    /// Fingerprint value of a short prefix of lms-substring.
+    /// An encoded short prefix of lms-substring as integer value.
     fp: X,
 }
 
@@ -395,7 +362,6 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
         let mut n = 1;
         let mut fp = text[i].r#as();
 
-        // upslope and plateau.
         while i + n < text.len() && text[i + n] >= text[i + n - 1] {
             if n < X::SIZE / C::SIZE {
                 fp <<= C::BIT_WIDTH;
@@ -404,7 +370,6 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
             n += 1;
         }
 
-        // downslope and valley.
         while i + n < text.len() && text[i + n] <= text[i + n - 1] {
             if n < X::SIZE / C::SIZE {
                 fp <<= C::BIT_WIDTH;
@@ -413,7 +378,7 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
             n += 1;
         }
 
-        // include sentinel.
+        // include the sentinel.
         if i + n == text.len() {
             n += 1;
             if n < X::SIZE / C::SIZE {
@@ -421,7 +386,7 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
                 fp |= C::MAX.r#as(); // C::MAX cannot be s-type.
             }
         } else {
-            // exclude the trailing part of valley.
+            // exclude the redundant trailing s-characters.
             while n > 0 && text[i + n - 1] == text[i + n - 2] {
                 n -= 1;
                 if n < X::SIZE / C::SIZE {
@@ -458,20 +423,19 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
     }
 }
 
-/// Write-only atomic slice.
-struct WriteOnlyAtomicSlice<'a, T: Uint + HasAtomic> {
+/// Atomic slice where each element could only be written at most once.
+struct WriteOnceAtomicSlice<'a, T: Uint + HasAtomic> {
     slice: &'a [T],
 }
 
-unsafe impl<'a, T: Uint + HasAtomic> Sync for WriteOnlyAtomicSlice<'a, T> {}
+unsafe impl<'a, T: Uint + HasAtomic> Sync for WriteOnceAtomicSlice<'a, T> {}
 
-impl<'a, T: Uint + HasAtomic> WriteOnlyAtomicSlice<'a, T> {
+impl<'a, T: Uint + HasAtomic> WriteOnceAtomicSlice<'a, T> {
     #[inline(always)]
     pub fn new(slice: &'a [T]) -> Self {
         assert_eq!(size_of::<T>(), size_of::<T::Atomic>());
         assert_eq!(0, (&slice[0] as *const T).align_offset(align_of::<T>()));
-
-        WriteOnlyAtomicSlice { slice }
+        WriteOnceAtomicSlice { slice }
     }
 
     #[inline(always)]
@@ -480,8 +444,14 @@ impl<'a, T: Uint + HasAtomic> WriteOnlyAtomicSlice<'a, T> {
     }
 
     #[inline(always)]
-    pub unsafe fn set(&self, i: usize, x: T) {
+    pub fn set(&self, i: usize, x: T) {
+        // use atomic store method.
         T::Atomic::store(unsafe { transmute(&self.slice[i]) }, x, Ordering::SeqCst)
+    }
+
+    #[inline(always)]
+    pub fn fence(&self) {
+        std::sync::atomic::fence(Ordering::SeqCst);
     }
 }
 
@@ -492,7 +462,7 @@ where
     C: SacaChar,
     I: SacaIndex,
 {
-    // get the original problem in tail of workspace.
+    // get lms-substrings by the order of position in text.
     let mut p = suf.len();
     foreach_lmschars(text, |i, _| {
         p -= 1;

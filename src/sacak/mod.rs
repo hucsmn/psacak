@@ -1,5 +1,6 @@
 #[macro_use]
 mod common;
+mod compact;
 mod naming;
 mod sacak32;
 mod sacak8;
