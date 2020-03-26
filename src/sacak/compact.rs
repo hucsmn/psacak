@@ -2,7 +2,7 @@ use std::ops::{Bound, RangeBounds};
 
 use super::types::*;
 
-/* TODO: rewrite using simd, when std::simd and specialization is stable. */
+/* TODO: rewrite using simd, when std::simd and specialization comes stablized. */
 
 /// Compact all the elements that not eqauls to `exclude` to the left (or right) side of array.
 ///

@@ -8,7 +8,7 @@ const EMPTY: u32 = 1 << 31;
 
 /// Inner level of SACA-K for integer strings.
 ///
-/// Assumes that characters are correctly translated to represent their bucket pointers.
+/// Assumes that characters are correctly translated to bucket pointers.
 #[inline]
 pub fn sacak32(text: &[u32], suf: &mut [u32]) {
     let suf = &mut suf[..text.len()];
@@ -19,13 +19,12 @@ pub fn sacak32(text: &[u32], suf: &mut [u32]) {
     }
 
     // induce sort lms-substrings.
-    put_lmschars(text, suf);
+    put_lmscharacters(text, suf);
     induce_sort(text, suf, true);
-    let n = compact_include(suf, 1..EMPTY, false);
 
-    // construct subproblem from sorted lms-substrings,
-    // then compute its suffix array.
-    let k = name_lmssubs(text, suf, n);
+    // construct subproblem, compute its suffix array, and get sorted lms-suffixes.
+    let n = compact_include(suf, 1..EMPTY, false);
+    let k = name_lmssubstrings(text, suf, n);
     if k < n {
         // need to solve the subproblem recursively.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
@@ -37,16 +36,16 @@ pub fn sacak32(text: &[u32], suf: &mut [u32]) {
             suf1[text1[i].as_index()] = i as u32;
         }
     }
-    permut_lmssufs(text, suf, n);
+    permutate_lmssuffixes(text, suf, n);
 
     // induce sort the suffix array from sorted lms-suffixes.
-    put_lmssufs(text, suf, n);
+    put_lmssuffixes(text, suf, n);
     induce_sort(text, suf, false);
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
 #[inline]
-fn put_lmschars(text: &[u32], suf: &mut [u32]) {
+fn put_lmscharacters(text: &[u32], suf: &mut [u32]) {
     suf.iter_mut().for_each(|p| *p = EMPTY);
 
     foreach_lmschars(text, |i, c| {
@@ -87,10 +86,9 @@ fn put_lmschars(text: &[u32], suf: &mut [u32]) {
     }
 }
 
-/// Put the sorted lms-suffixes, originally located in head of workspace,
-/// to their corresponding bucket tails.
+/// Put the sorted lms-suffixes, originally located in head of workspace, to their corresponding bucket tails.
 #[inline]
-fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
+fn put_lmssuffixes(text: &[u32], suf: &mut [u32], n: usize) {
     suf[n..].iter_mut().for_each(|p| *p = EMPTY);
 
     // copy sorted lms-suffixes bucket by bucket.
@@ -110,10 +108,10 @@ fn put_lmssufs(text: &[u32], suf: &mut [u32], n: usize) {
     }
 }
 
-/// Induce sort s/lms-suffixes from sorted lms-suffixes.
+/// Induce sort all the suffixes (or lms-substrings) from the sorted lms-suffixes (or lms-characters).
 #[inline]
 fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
-    // stage 1. induce l/lml-suffixes from lms-suffixes.
+    // stage 1. induce l (or lml) from lms.
 
     // the sentinel.
     let p = text[text.len() - 1] as usize;
@@ -191,7 +189,7 @@ fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
         }
     }
 
-    // stage 2. induce s/lms-suffixes from l/lml-suffixes.
+    // stage 2. induce s (or lms) from l (or lml).
 
     let mut i = text.len() - 1;
     loop {
@@ -262,7 +260,7 @@ fn to_counter(n: usize) -> u32 {
     (-(n as u32 as i32)) as u32
 }
 
-// tests for sacak32.
+// Simple sacak32 tests.
 #[cfg(test)]
 mod tests {
     use super::super::common::*;
@@ -306,6 +304,7 @@ mod tests {
         let (mut text, k) = reduce_alphabet(text);
         let mut suf = vec![0u32; text.len()];
         if k >= text.len() {
+            // sacak32 cannot sort permutations, simply skip those test cases.
             saca_tiny(&text[..], &mut suf[..]);
         } else {
             translate_text(&mut text[..], &mut suf[..], k);

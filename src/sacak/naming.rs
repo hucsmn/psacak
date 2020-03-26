@@ -21,18 +21,18 @@ pub type DefaultFingerprint = UintFingerprint<u128>;
 
 /// Name sorted lms-substrings in head of workspace, then produce subproblem in tail.
 #[inline]
-pub fn name_lmssubs<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
+pub fn name_lmssubstrings<C, I>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
 {
-    name_lmssubs_using::<C, I, DefaultFingerprint>(text, suf, n)
+    name_lmssubstrings_using::<C, I, DefaultFingerprint>(text, suf, n)
 }
 
 /// Name sorted lms-substrings in head of workspace, then produce subproblem in tail,
 /// using customed fingerprint type.
 #[inline]
-pub fn name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+pub fn name_lmssubstrings_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
@@ -40,19 +40,19 @@ where
 {
     if n < PARALLEL_NAME_THRESHOLD || n < rayon::current_num_threads() + 1 {
         // serial version, for small amount of lms-substrings.
-        nonpar_name_lmssubs_using::<C, I, FP>(text, suf, n)
+        nonpar_name_lmssubstrings_using::<C, I, FP>(text, suf, n)
     } else if text.len() <= I::LOWER_BITS.as_index() {
         // faster version, only works when lms-substrings <= I::MAX/2.
-        fastpar_name_lmssubs_using::<C, I, FP>(text, suf, n)
+        fastpar_name_lmssubstrings_using::<C, I, FP>(text, suf, n)
     } else {
         // fallback version, runs slower to avoid data race.
-        par_name_lmssubs_using::<C, I, FP>(text, suf, n)
+        par_name_lmssubstrings_using::<C, I, FP>(text, suf, n)
     }
 }
 
 /// Name sorted lms-substrings in serial, using customed fingerprint type.
 #[inline]
-fn nonpar_name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+fn nonpar_name_lmssubstrings_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
@@ -98,7 +98,7 @@ where
 
 /// Name sorted lms-substrings partially in parallel, using customed fingerprint type.
 #[inline]
-fn par_name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+fn par_name_lmssubstrings_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
@@ -171,7 +171,7 @@ where
 
 /// Name lms-substrings in parallel, using customed fingerprint type.
 #[inline]
-fn fastpar_name_lmssubs_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
+fn fastpar_name_lmssubstrings_using<C, I, FP>(text: &[C], suf: &mut [I], n: usize) -> usize
 where
     C: SacaChar,
     I: SacaIndex + SacaChar,
@@ -337,7 +337,7 @@ impl<C: SacaChar> Fingerprint<C> for usize {
 }
 
 /// Fingerprint that stores a short prefix of the lms-substring in a big integer.
-/// 
+///
 /// In most cases, lms-substrings are very short.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct UintFingerprint<X: Uint> {
@@ -457,12 +457,12 @@ impl<'a, T: Uint + HasAtomic> WriteOnceAtomicSlice<'a, T> {
 
 /// Permutate lms-suffixes in place, using the suffix array of subproblem in head of workspace.
 #[inline]
-pub fn permut_lmssufs<C, I>(text: &[C], suf: &mut [I], n: usize)
+pub fn permutate_lmssuffixes<C, I>(text: &[C], suf: &mut [I], n: usize)
 where
     C: SacaChar,
     I: SacaIndex,
 {
-    // get lms-substrings by the order of position in text.
+    // get lms-substrings ordered by the position in text.
     let mut p = suf.len();
     foreach_lmschars(text, |i, _| {
         p -= 1;

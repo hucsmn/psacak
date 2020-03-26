@@ -31,7 +31,7 @@ impl SacaCharType {
     }
 }
 
-/// Enumerate characters and types, in reversed order.
+/// Enumerate characters and types, traversal in reversed order.
 #[inline(always)]
 pub fn foreach_typedchars<C, F>(text: &[C], mut f: F)
 where
@@ -60,7 +60,7 @@ where
     f(0, t, text[0]);
 }
 
-/// Enumerate characters and types, in reversed order.
+/// Enumerate characters and types, traversal in reversed order.
 #[inline(always)]
 pub fn foreach_typedchars_mut<C, F>(text: &mut [C], mut f: F)
 where
@@ -89,7 +89,7 @@ where
     f(0, t, &mut text[0]);
 }
 
-/// Specialized lms-characters enumerator, in reversed order.
+/// Specialized lms-characters enumerator, traversal in reversed order.
 #[inline(always)]
 pub fn foreach_lmschars<C, F>(text: &[C], mut f: F)
 where

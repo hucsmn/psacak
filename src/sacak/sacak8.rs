@@ -6,12 +6,9 @@ use super::naming::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
-pub const MAX_LENGTH: usize = (!0u32 - 1) as usize;
-
 /// Initial level of SACA-K for byte strings.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
-    assert!(text.len() <= MAX_LENGTH);
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {
@@ -23,13 +20,12 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     let mut bkt = Buckets::new(text);
 
     // induce sort lms-substrings.
-    put_lmschars(text, suf, &mut bkt);
+    put_lmscharacters(text, suf, &mut bkt);
     induce_sort(text, suf, &mut bkt, true);
-    let n = compact_exclude(suf, 0, false);
 
-    // construct subproblem from sorted lms-substrings,
-    // then compute its suffix array.
-    let k = name_lmssubs(text, suf, n);
+    // construct subproblem, compute its suffix array, and get sorted lms-suffixes.
+    let n = compact_exclude(suf, 0, false);
+    let k = name_lmssubstrings(text, suf, n);
     if k < n {
         // need to solve the subproblem recursively.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
@@ -41,16 +37,16 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
             suf1[text1[i].as_index()] = i as u32;
         }
     }
-    permut_lmssufs(text, suf, n);
+    permutate_lmssuffixes(text, suf, n);
 
     // induce sort the suffix array from sorted lms-suffixes.
-    put_lmssufs(text, suf, &mut bkt, n);
+    put_lmssuffixes(text, suf, &mut bkt, n);
     induce_sort(text, suf, &mut bkt, false);
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
 #[inline]
-fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
+fn put_lmscharacters(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.set_tail();
     suf.iter_mut().for_each(|p| *p = 0);
 
@@ -67,10 +63,9 @@ fn put_lmschars(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     });
 }
 
-/// Put the sorted lms-suffixes, originally located in head of workspace,
-/// to their corresponding bucket tails.
+/// Put the sorted lms-suffixes, originally located in head of workspace, to their corresponding bucket tails.
 #[inline]
-fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
+fn put_lmssuffixes(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
     bkt.set_tail();
     suf[n..].iter_mut().for_each(|p| *p = 0);
 
@@ -83,10 +78,10 @@ fn put_lmssufs(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
     }
 }
 
-/// Induce sort s/lms-suffixes from sorted lms-suffixes.
+/// Induce sort all the suffixes (or lms-substrings) from the sorted lms-suffixes (or lms-characters).
 #[inline]
 fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
-    // stage 1. induce l/lml-suffixes from lms-suffixes.
+    // stage 1. induce l (or lml) from lms.
 
     bkt.set_head();
 
@@ -103,7 +98,7 @@ fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool)
             let c0 = text[j];
             let c1 = text[j + 1];
             if c0 != prev_c0 {
-                // reduce cache misses when data is repetitive.
+                // reduce cache misses for repetitive data.
                 bkt[prev_c0] = p as u32;
                 p = bkt[c0] as usize;
                 prev_c0 = c0;
@@ -120,7 +115,7 @@ fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool)
         }
     }
 
-    // stage 2. induce s/lms-suffixes from l/lml-suffixes.
+    // stage 2. induce s or (lms) from l (or lml).
 
     bkt.set_tail();
 
@@ -133,7 +128,7 @@ fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool)
             let c0 = text[j];
             let c1 = text[j];
             if c0 != prev_c0 {
-                // reduce cache misses when data is repetitive.
+                // reduce cache misses for repetitive data.
                 bkt[prev_c0] = p as u32;
                 p = bkt[c0] as usize;
                 prev_c0 = c0;
@@ -151,7 +146,7 @@ fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool)
     }
 }
 
-/// Copy within slice, then reset blank zone with given value.
+/// Copy within slice, and reset source area to given value.
 #[inline(always)]
 fn move_within<T: Copy>(slice: &mut [T], src: std::ops::Range<usize>, dest: usize, reset: T) {
     let (i, j, k) = (src.start, src.end, dest);
@@ -168,7 +163,7 @@ fn move_within<T: Copy>(slice: &mut [T], src: std::ops::Range<usize>, dest: usiz
     slice[blank].iter_mut().for_each(|p| *p = reset);
 }
 
-/// Byte string bucket pointers.
+/// Bucket pointers and lms-character counters for byte string.
 struct Buckets {
     ptrs: [u32; 256],
     bounds: [u32; 257],
@@ -230,7 +225,7 @@ impl IndexMut<u8> for Buckets {
     }
 }
 
-// tests for sacak8.
+// Simple sacak8 tests.
 #[cfg(test)]
 mod tests {
     use super::super::common::saca_tiny;
