@@ -1,10 +1,6 @@
-use std::mem::{align_of, size_of, transmute};
-use std::sync::atomic::{fence, AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
-
 use rayon::prelude::*;
 
 use super::common::*;
-use super::compact::*;
 use super::types::*;
 
 /// Threshold to name lms-substrings in parallel.
@@ -220,7 +216,7 @@ where
         .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = I::MAX));
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     {
-        let work = WriteOnceAtomicSlice::new(work);
+        let work = WoAtomicSlice::new(work);
         lmssubs[1..]
             .par_chunks(chunk_size)
             .zip(k0s.into_par_iter())
@@ -276,16 +272,6 @@ fn translate<I: SacaIndex + SacaChar>(text: &mut [I], bkt_tails: &[I]) {
             *p = bkt_tails[c] - I::ONE;
         }
     });
-}
-
-/// Calculate `ceil(x/y)`.
-#[inline(always)]
-fn ceil_divide(x: usize, y: usize) -> usize {
-    if x != 0 {
-        1 + ((x - 1) / y)
-    } else {
-        0
-    }
 }
 
 // Lengths of lms-substrings as legacy fingerprints.
@@ -420,38 +406,6 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
         i += X::SIZE / C::SIZE;
         j += X::SIZE / C::SIZE;
         &text[i..p] == &text[j..q]
-    }
-}
-
-/// Atomic slice where each element could only be written at most once.
-struct WriteOnceAtomicSlice<'a, T: Uint + HasAtomic> {
-    slice: &'a [T],
-}
-
-unsafe impl<'a, T: Uint + HasAtomic> Sync for WriteOnceAtomicSlice<'a, T> {}
-
-impl<'a, T: Uint + HasAtomic> WriteOnceAtomicSlice<'a, T> {
-    #[inline(always)]
-    pub fn new(slice: &'a [T]) -> Self {
-        assert_eq!(size_of::<T>(), size_of::<T::Atomic>());
-        assert_eq!(0, (&slice[0] as *const T).align_offset(align_of::<T>()));
-        WriteOnceAtomicSlice { slice }
-    }
-
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.slice.len()
-    }
-
-    #[inline(always)]
-    pub fn set(&self, i: usize, x: T) {
-        // use atomic store method.
-        T::Atomic::store(unsafe { transmute(&self.slice[i]) }, x, Ordering::SeqCst)
-    }
-
-    #[inline(always)]
-    pub fn fence(&self) {
-        std::sync::atomic::fence(Ordering::SeqCst);
     }
 }
 

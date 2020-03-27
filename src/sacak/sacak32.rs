@@ -1,5 +1,4 @@
 use super::common::*;
-use super::compact::*;
 use super::naming::*;
 use super::types::*;
 

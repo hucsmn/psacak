@@ -1,7 +1,6 @@
 use std::ops::{Index, IndexMut};
 
 use super::common::*;
-use super::compact::*;
 use super::naming::*;
 use super::sacak32::sacak32;
 use super::types::*;
