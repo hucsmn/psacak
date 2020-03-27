@@ -221,13 +221,15 @@ impl<'a, T: Uint + HasAtomic> WoAtomicSlice<'a, T> {
         self.slice.len()
     }
 
+    /// Atomic set element, caller should ensure that each element would be written at most once.
     #[inline(always)]
-    pub fn set(&self, i: usize, x: T) {
+    pub unsafe fn set(&self, i: usize, x: T) {
         T::Atomic::store(unsafe { transmute(&self.slice[i]) }, x, Ordering::SeqCst)
     }
 
+    // Force globally visible.
     #[inline(always)]
-    pub fn fence(&self) {
+    pub unsafe fn fence(&self) {
         std::sync::atomic::fence(Ordering::SeqCst);
     }
 }

@@ -228,10 +228,13 @@ where
                         k += 1;
                     }
                     // provable: it writes at most once for each element.
-                    work.set((chunk[i] & I::LOWER_BITS).as_index() / 2, I::from_index(k));
+                    unsafe {
+                        work.set((chunk[i] & I::LOWER_BITS).as_index() / 2, I::from_index(k));
+                    }
                 }
-                // force globally visible.
-                work.fence();
+                unsafe {
+                    work.fence();
+                }
             });
     }
 
