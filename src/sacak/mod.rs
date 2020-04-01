@@ -1,6 +1,7 @@
 #[macro_use]
 mod common;
 mod naming;
+mod pipeline;
 mod sacak32;
 mod sacak8;
 mod types;
