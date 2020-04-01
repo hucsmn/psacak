@@ -125,7 +125,7 @@ fn induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool)
             // c1 is non-empty, and has a preceding character c0.
             let j = (suf[i] - 1) as usize;
             let c0 = text[j];
-            let c1 = text[j];
+            let c1 = text[j + 1];
             if c0 != prev_c0 {
                 // reduce cache misses for repetitive data.
                 bkt[prev_c0] = p as u32;

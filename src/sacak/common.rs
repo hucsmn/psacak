@@ -201,36 +201,81 @@ pub fn ceil_divide(x: usize, y: usize) -> usize {
     }
 }
 
-/// Atomic slice where each element could only be written.
-pub struct WoAtomicSlice<'a, T: Uint + HasAtomic> {
+/// Atomic unsigned integer array reader/writer.
+#[derive(Debug)]
+pub struct AtomicSlice<'a, T: Uint + HasAtomic> {
     slice: &'a [T],
 }
 
-unsafe impl<'a, T: Uint + HasAtomic> Sync for WoAtomicSlice<'a, T> {}
+unsafe impl<'a, T: Uint + HasAtomic> Sync for AtomicSlice<'a, T> {}
 
-impl<'a, T: Uint + HasAtomic> WoAtomicSlice<'a, T> {
-    #[inline(always)]
-    pub fn new(slice: &'a [T]) -> Self {
+impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
+    /// Create an atomic unsigned integer array reader/writer from a mutable slice.
+    #[inline]
+    pub fn new(slice: &'a mut [T]) -> Self {
         assert_eq!(size_of::<T>(), size_of::<T::Atomic>());
         assert_eq!(0, (&slice[0] as *const T).align_offset(align_of::<T>()));
-        WoAtomicSlice { slice }
+        AtomicSlice { slice }
     }
 
+    /// Overwrite destination vector with the whole slice.
+    #[inline]
+    pub unsafe fn copy_to_vec(&self, dest: &mut Vec<T>) {
+        dest.truncate(0);
+        for i in 0..self.len() {
+            // slow but atomic.
+            dest.push(self.get(i));
+        }
+    }
+
+    /// Copy The whole slice out to a new vector.
+    #[inline]
+    pub unsafe fn into_vec(&self) -> Vec<T> {
+        let mut ret = Vec::with_capacity(self.len());
+        self.copy_to_vec(&mut ret);
+        ret
+    }
+
+    /// Get slice length.
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.slice.len()
     }
 
-    /// Atomic set element, caller should ensure that each element would be written at most once.
+    /// Make subslice.
     #[inline(always)]
-    pub unsafe fn set(&self, i: usize, x: T) {
-        T::Atomic::store(unsafe { transmute(&self.slice[i]) }, x, Ordering::SeqCst)
+    pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Self {
+        let start = match range.start_bound() {
+            Bound::Included(&x) => x,
+            Bound::Excluded(&x) => x.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            Bound::Included(&x) => x.saturating_add(1),
+            Bound::Excluded(&x) => x,
+            Bound::Unbounded => self.len(),
+        };
+        AtomicSlice {
+            slice: &self.slice[start..end],
+        }
     }
 
-    // Force globally visible.
+    /// Get element atomically.
     #[inline(always)]
-    pub unsafe fn fence(&self) {
-        std::sync::atomic::fence(Ordering::SeqCst);
+    pub unsafe fn get(&self, i: usize) -> T {
+        T::Atomic::load(unsafe { transmute(&self.slice[i]) }, Ordering::Relaxed)
+    }
+
+    /// Set element atomically.
+    #[inline(always)]
+    pub unsafe fn set(&self, i: usize, x: T) {
+        T::Atomic::store(unsafe { transmute(&self.slice[i]) }, x, Ordering::Relaxed)
+    }
+
+    /// Explicit memory fence.
+    #[inline(always)]
+    pub fn fence(&self, order: Ordering) {
+        std::sync::atomic::fence(order)
     }
 }
 

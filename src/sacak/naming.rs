@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use rayon::prelude::*;
 
 use super::common::*;
@@ -216,7 +218,7 @@ where
         .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = I::MAX));
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     {
-        let work = WoAtomicSlice::new(work);
+        let work = unsafe { AtomicSlice::new(work) };
         lmssubs[1..]
             .par_chunks(chunk_size)
             .zip(k0s.into_par_iter())
@@ -227,13 +229,11 @@ where
                     if chunk[i] & I::HIGHEST_BIT != I::ZERO {
                         k += 1;
                     }
-                    // provable: it writes at most once for each element.
+                    // provable: no element would be written twice.
                     unsafe {
-                        work.set((chunk[i] & I::LOWER_BITS).as_index() / 2, I::from_index(k));
+                        let pos = (chunk[i] & I::LOWER_BITS).as_index() / 2;
+                        work.set(pos, I::from_index(k));
                     }
-                }
-                unsafe {
-                    work.fence();
                 }
             });
     }
