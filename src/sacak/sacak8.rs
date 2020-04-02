@@ -200,15 +200,15 @@ fn par_induce_sort(
     left_most: bool,
 ) {
     let suf = AtomicSlice::new(suf);
-    let prefetch_worker = |(filtered_block, mut rbuf): (Vec<u32>, ReadBuffer)| {
-        rbuf.prefetch(text, &filtered_block);
+    let fetch_worker = |(filtered_block, mut rbuf): (Vec<u32>, ReadBuffer)| {
+        rbuf.fetch(text, &filtered_block);
         (filtered_block, rbuf)
     };
     let flush_worker = |mut wbuf: WriteBuffer| {
         wbuf.flush(&suf);
         wbuf
     };
-    pipeline.begin(prefetch_worker, flush_worker, |prefetch, flush| {
+    pipeline.begin(fetch_worker, flush_worker, |fetch, flush| {
         // stage 1. induce l (or lml) from lms.
 
         // the sentinel.
@@ -224,16 +224,16 @@ fn par_induce_sort(
         // worker states.
         let mut rbuf = ReadBuffer::with_capacity(block_size);
         let mut wbuf = WriteBuffer::with_capacity(block_size);
-        let mut prefetch_state;
+        let mut fetch_state;
         let mut flush_state;
 
-        // start prefetch B[0].
-        prefetch_state = (Vec::with_capacity(block_size), ReadBuffer::with_capacity(block_size));
+        // start fetch B[0].
+        fetch_state = (Vec::with_capacity(block_size), ReadBuffer::with_capacity(block_size));
         unsafe {
             suf.slice(..block_size.min(suf.len()))
-                .copy_exclude(&mut prefetch_state.0, 0);
+                .copy_exclude(&mut fetch_state.0, 0);
         }
-        prefetch.start(prefetch_state);
+        fetch.start(fetch_state);
 
         // start the pipeline.
         for i in 0..ceil_divide(suf.len(), block_size) {
@@ -241,13 +241,13 @@ fn par_induce_sort(
             let end = start.saturating_add(block_size).min(suf.len());
             let bound = end.saturating_add(block_size).min(suf.len());
 
-            // wait prefetch B[i], start prefetch B[i+1].
-            prefetch_state = prefetch.wait();
+            // wait fetch B[i], start fetch B[i+1].
+            fetch_state = fetch.wait();
             unsafe {
-                suf.slice(end..bound).copy_exclude(&mut prefetch_state.0, 0);
+                suf.slice(end..bound).copy_exclude(&mut fetch_state.0, 0);
             }
-            swap(&mut rbuf, &mut prefetch_state.1);
-            prefetch.start(prefetch_state);
+            swap(&mut rbuf, &mut fetch_state.1);
+            fetch.start(fetch_state);
 
             // induce_lchars B[i].
             for i in start..end {
@@ -255,7 +255,7 @@ fn par_induce_sort(
                 if x > 0 {
                     // query the read buffer.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.get_front(j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = rbuf.pop_front(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -291,13 +291,13 @@ fn par_induce_sort(
 
         // stage 2. induce s or (lms) from l (or lml).
 
-        // start prefetch Brev[0].
-        prefetch_state = prefetch.wait();
+        // start fetch Brev[0].
+        fetch_state = fetch.wait();
         unsafe {
             suf.slice(suf.len().saturating_sub(block_size)..)
-                .copy_exclude(&mut prefetch_state.0, 0);
+                .copy_exclude(&mut fetch_state.0, 0);
         }
-        prefetch.start(prefetch_state);
+        fetch.start(fetch_state);
 
         // start the pipeline.
         bkt.set_tail();
@@ -308,13 +308,13 @@ fn par_induce_sort(
             let end = start.saturating_sub(block_size);
             let bound = end.saturating_sub(block_size);
 
-            // wait prefetch Brev[i], start prefetch Brev[i+1].
-            prefetch_state = prefetch.wait();
+            // wait fetch Brev[i], start fetch Brev[i+1].
+            fetch_state = fetch.wait();
             unsafe {
-                suf.slice(bound..end).copy_exclude(&mut prefetch_state.0, 0);
+                suf.slice(bound..end).copy_exclude(&mut fetch_state.0, 0);
             }
-            swap(&mut rbuf, &mut prefetch_state.1);
-            prefetch.start(prefetch_state);
+            swap(&mut rbuf, &mut fetch_state.1);
+            fetch.start(fetch_state);
 
             // induce_schars Brev[i].
             for i in (end..start).rev() {
@@ -322,7 +322,7 @@ fn par_induce_sort(
                 if x > 0 {
                     // query the read buffer.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.get_back(j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = rbuf.pop_back(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -352,8 +352,8 @@ fn par_induce_sort(
             flush.start(flush_state);
         }
 
-        // join prefetch and flush worker.
-        prefetch.wait();
+        // wait fetch Brev[^], wait flush Brev[^].
+        fetch.wait();
         flush.wait();
     });
 }
@@ -446,7 +446,7 @@ impl ReadBuffer {
     }
 
     #[inline(always)]
-    pub fn get_front(&mut self, i: usize) -> Option<(u8, u8)> {
+    pub fn pop_front(&mut self, i: usize) -> Option<(u8, u8)> {
         if self.head >= self.tail {
             return None;
         }
@@ -460,7 +460,7 @@ impl ReadBuffer {
     }
 
     #[inline(always)]
-    pub fn get_back(&mut self, i: usize) -> Option<(u8, u8)> {
+    pub fn pop_back(&mut self, i: usize) -> Option<(u8, u8)> {
         if self.tail <= self.head {
             return None;
         }
@@ -475,7 +475,7 @@ impl ReadBuffer {
 
     /// Fetch text to the read buffer in parallel using filtered sequence of indices.
     #[inline]
-    pub fn prefetch(&mut self, text: &[u8], filtered_block: &Vec<u32>) {
+    pub fn fetch(&mut self, text: &[u8], filtered_block: &Vec<u32>) {
         self.reset();
         self.buf.par_extend(
             filtered_block

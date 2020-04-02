@@ -14,22 +14,22 @@ impl Pipeline {
     }
 
     /// Start the induce pipeline.
-    pub fn begin<'scope, S, T, PF, FL, BODY>(&mut self, prefetch: PF, flush: FL, body: BODY)
+    pub fn begin<'scope, S, T, FETCH, FLUSH, INDUCE>(&mut self, fetch: FETCH, flush: FLUSH, induce: INDUCE)
     where
         S: Send + 'scope,
         T: Send + 'scope,
-        PF: Fn(S) -> S + 'scope + Send,
-        FL: Fn(T) -> T + 'scope + Send,
-        BODY: FnOnce(Worker<'scope, S>, Worker<'scope, T>) + 'scope + Send,
+        FETCH: Fn(S) -> S + 'scope + Send,
+        FLUSH: Fn(T) -> T + 'scope + Send,
+        INDUCE: FnOnce(Worker<'scope, S>, Worker<'scope, T>) + 'scope + Send,
     {
         if self.pool.is_none() {
             self.pool = Some(Pool::new(2));
         }
         if let Some(ref mut pool) = self.pool {
             pool.scoped(|scope| {
-                let pf = Worker::new(scope, prefetch);
-                let fl = Worker::new(scope, flush);
-                body(pf, fl);
+                let fetch_worker = Worker::new(scope, fetch);
+                let flush_worker = Worker::new(scope, flush);
+                induce(fetch_worker, flush_worker);
             });
         } else {
             unreachable!();
