@@ -220,20 +220,11 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
 
     /// Overwrite destination vector with the whole slice.
     #[inline]
-    pub unsafe fn copy_to_vec(&self, dest: &mut Vec<T>) {
-        dest.truncate(0);
-        for i in 0..self.len() {
-            // slow but atomic.
-            dest.push(self.get(i));
-        }
-    }
-
-    /// Copy The whole slice out to a new vector.
-    #[inline]
-    pub unsafe fn into_vec(&self) -> Vec<T> {
-        let mut ret = Vec::with_capacity(self.len());
-        self.copy_to_vec(&mut ret);
-        ret
+    pub unsafe fn copy_exclude(&self, dest: &mut Vec<T>, exclude: T) {
+        dest.resize(self.len(), T::ZERO);
+        dest.copy_from_slice(self.slice);
+        let n = compact_exclude(&mut dest[..], exclude, false);
+        dest.truncate(n);
     }
 
     /// Get slice length.

@@ -14,7 +14,7 @@ use super::types::*;
 const BLOCK_SIZE: usize = 128 * 1024;
 
 /// Threshold to enable paralled induce sorting.
-const THRESHOLD_PARALLEL_INDUCE: usize = BLOCK_SIZE * 8;
+const THRESHOLD_PARALLEL_INDUCE: usize = 32 * 1024 * 1024;
 
 /// Initial level of SACA-K for byte strings.
 #[inline]
@@ -233,10 +233,11 @@ fn par_induce_sort(
         let mut flush_state;
 
         // start prefetch B[0].
-        prefetch_state = (
-            unsafe { suf.slice(..block_size.min(suf.len())).into_vec() },
-            ReadBuffer::with_capacity(block_size),
-        );
+        prefetch_state = (Vec::with_capacity(block_size), ReadBuffer::with_capacity(block_size));
+        unsafe {
+            suf.slice(..block_size.min(suf.len()))
+                .copy_exclude(&mut prefetch_state.0, 0);
+        }
         prefetch.start(prefetch_state);
 
         // start the pipeline.
@@ -249,7 +250,7 @@ fn par_induce_sort(
             prefetch_state = prefetch.wait();
             swap(&mut rbuf, &mut prefetch_state.1);
             unsafe {
-                suf.slice(end..bound).copy_to_vec(&mut prefetch_state.0);
+                suf.slice(end..bound).copy_exclude(&mut prefetch_state.0, 0);
             }
             prefetch.start(prefetch_state);
 
@@ -302,7 +303,7 @@ fn par_induce_sort(
         // start prefetch B_rev[0].
         unsafe {
             suf.slice(suf.len().saturating_sub(block_size)..)
-                .copy_to_vec(&mut prefetch_state.0);
+                .copy_exclude(&mut prefetch_state.0, 0);
         }
         prefetch.start(prefetch_state);
 
@@ -319,7 +320,7 @@ fn par_induce_sort(
             prefetch_state = prefetch.wait();
             swap(&mut rbuf, &mut prefetch_state.1);
             unsafe {
-                suf.slice(bound..end).copy_to_vec(&mut prefetch_state.0);
+                suf.slice(bound..end).copy_exclude(&mut prefetch_state.0, 0);
             }
             prefetch.start(prefetch_state);
 
@@ -376,7 +377,6 @@ fn prefetch_procedure(text: &[u8], block: &Vec<u32>, rbuf: &mut ReadBuffer) {
     rbuf.buf.par_extend(
         block
             .par_iter()
-            .filter(|&&i| i > 0)
             .map(|&i| (i - 1, text[i as usize - 1], text[i as usize])),
     );
 }
