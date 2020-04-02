@@ -254,7 +254,7 @@ fn par_induce_sort(
             }
             prefetch.start(prefetch_state);
 
-            // induce_l B[i].
+            // induce_lchars B[i].
             for i in start..end {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
@@ -294,13 +294,10 @@ fn par_induce_sort(
             flush.start(flush_state);
         }
 
-        // wait prefetch B[$], wait flush B[$].
-        prefetch_state = prefetch.wait();
-        flush.wait();
-
         // stage 2. induce s or (lms) from l (or lml).
 
         // start prefetch B_rev[0].
+        prefetch_state = prefetch.wait();
         unsafe {
             suf.slice(suf.len().saturating_sub(block_size)..)
                 .copy_exclude(&mut prefetch_state.0, 0);
@@ -324,7 +321,7 @@ fn par_induce_sort(
             }
             prefetch.start(prefetch_state);
 
-            // induce_s B_rev[i].
+            // induce_schars B_rev[i].
             for i in (end..start).rev() {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
@@ -355,16 +352,12 @@ fn par_induce_sort(
             }
 
             // wait flush B_rev[..i+1], start flush B_rev[..i+2].
-            if i == 0 {
-                flush_state = WriteBuffer::with_capacity(block_size);
-            } else {
-                flush_state = flush.wait();
-            }
+            flush_state = flush.wait();
             swap(&mut wbuf, &mut flush_state);
             flush.start(flush_state);
         }
 
-        // wait prefetch B[^], wait flush B[^].
+        // join prefetch and flush worker.
         prefetch.wait();
         flush.wait();
     });
@@ -403,6 +396,68 @@ fn flush_procedure<'a>(suf: &AtomicSlice<'a, u32>, wbuf: &mut WriteBuffer) {
             });
     }
     wbuf.reset();
+}
+
+/// Bucket pointers and lms-character counters for byte string.
+struct Buckets {
+    ptrs: [u32; 256],
+    bounds: [u32; 257],
+    lmscnts: [u32; 256],
+}
+
+impl Buckets {
+    #[inline(always)]
+    pub fn new(text: &[u8]) -> Self {
+        let mut bkt = Buckets {
+            ptrs: [0; 256],
+            bounds: [0; 257],
+            lmscnts: [0; 256],
+        };
+        foreach_typedchars(text, |_, t, c| {
+            bkt.bounds[c as usize + 1] += 1;
+            if t.is_lms() {
+                bkt.lmscnts[c as usize] += 1;
+            }
+        });
+        let mut p = 0;
+        for i in 1..257 {
+            let cnt = bkt.bounds[i];
+            bkt.bounds[i] += p;
+            p += cnt;
+        }
+        bkt
+    }
+
+    #[inline(always)]
+    pub fn set_head(&mut self) {
+        self.ptrs.copy_from_slice(&self.bounds[..256]);
+    }
+
+    #[inline(always)]
+    pub fn set_tail(&mut self) {
+        self.ptrs.copy_from_slice(&self.bounds[1..257]);
+    }
+
+    #[inline(always)]
+    pub fn get_lms_count(&self, c: u8) -> usize {
+        self.lmscnts[c as usize] as usize
+    }
+}
+
+impl Index<u8> for Buckets {
+    type Output = u32;
+
+    #[inline(always)]
+    fn index(&self, c: u8) -> &Self::Output {
+        &self.ptrs[c as usize]
+    }
+}
+
+impl IndexMut<u8> for Buckets {
+    #[inline(always)]
+    fn index_mut(&mut self, c: u8) -> &mut Self::Output {
+        &mut self.ptrs[c as usize]
+    }
 }
 
 /// Read buffer for paralleled induce sorting.
@@ -468,68 +523,6 @@ impl WriteBuffer {
     #[inline(always)]
     pub fn push(&mut self, i: u32, x: u32) {
         self.buf.push((i, x));
-    }
-}
-
-/// Bucket pointers and lms-character counters for byte string.
-struct Buckets {
-    ptrs: [u32; 256],
-    bounds: [u32; 257],
-    lmscnts: [u32; 256],
-}
-
-impl Buckets {
-    #[inline(always)]
-    pub fn new(text: &[u8]) -> Self {
-        let mut bkt = Buckets {
-            ptrs: [0; 256],
-            bounds: [0; 257],
-            lmscnts: [0; 256],
-        };
-        foreach_typedchars(text, |_, t, c| {
-            bkt.bounds[c as usize + 1] += 1;
-            if t.is_lms() {
-                bkt.lmscnts[c as usize] += 1;
-            }
-        });
-        let mut p = 0;
-        for i in 1..257 {
-            let cnt = bkt.bounds[i];
-            bkt.bounds[i] += p;
-            p += cnt;
-        }
-        bkt
-    }
-
-    #[inline(always)]
-    pub fn set_head(&mut self) {
-        self.ptrs.copy_from_slice(&self.bounds[..256]);
-    }
-
-    #[inline(always)]
-    pub fn set_tail(&mut self) {
-        self.ptrs.copy_from_slice(&self.bounds[1..257]);
-    }
-
-    #[inline(always)]
-    pub fn get_lms_count(&self, c: u8) -> usize {
-        self.lmscnts[c as usize] as usize
-    }
-}
-
-impl Index<u8> for Buckets {
-    type Output = u32;
-
-    #[inline(always)]
-    fn index(&self, c: u8) -> &Self::Output {
-        &self.ptrs[c as usize]
-    }
-}
-
-impl IndexMut<u8> for Buckets {
-    #[inline(always)]
-    fn index_mut(&mut self, c: u8) -> &mut Self::Output {
-        &mut self.ptrs[c as usize]
     }
 }
 
