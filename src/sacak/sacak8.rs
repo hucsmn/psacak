@@ -14,7 +14,7 @@ use super::types::*;
 const BLOCK_SIZE: usize = 128 * 1024;
 
 /// Threshold to enable paralled induce sorting.
-const THRESHOLD_PARALLEL_INDUCE: usize = 32 * 1024 * 1024;
+const THRESHOLD_PARALLEL_INDUCE: usize = 16 * 1024 * 1024;
 
 /// Initial level of SACA-K for byte strings.
 #[inline]
@@ -260,7 +260,7 @@ fn par_induce_sort(
                 if x > 0 {
                     // query the prefetched buffer.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.get(j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = rbuf.get_front(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -327,7 +327,7 @@ fn par_induce_sort(
                 if x > 0 {
                     // query the prefetched buffer.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.get(j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = rbuf.get_back(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -372,18 +372,16 @@ fn prefetch_procedure(text: &[u8], block: &Vec<u32>, rbuf: &mut ReadBuffer) {
             .par_iter()
             .map(|&i| (i - 1, text[i as usize - 1], text[i as usize])),
     );
+    rbuf.tail = rbuf.buf.len();
 }
 
 /// Flush procedure for paralleled induce sorting.
 #[inline(always)]
 fn flush_procedure<'a>(suf: &AtomicSlice<'a, u32>, wbuf: &mut WriteBuffer) {
-    if wbuf.buf.len() < rayon::current_num_threads() {
-        for (i, x) in wbuf.buf.iter().cloned() {
-            unsafe {
-                suf.set(i as usize, x);
-            }
-        }
-        suf.fence(Ordering::SeqCst);
+    if wbuf.buf.len() <= rayon::current_num_threads() {
+        wbuf.buf.par_iter().for_each(|&(i, x)| unsafe {
+            suf.set(i as usize, x);
+        });
     } else {
         wbuf.buf
             .par_chunks(ceil_divide(wbuf.buf.len(), rayon::current_num_threads()))
@@ -464,7 +462,8 @@ impl IndexMut<u8> for Buckets {
 #[derive(Debug)]
 struct ReadBuffer {
     buf: Vec<(u32, u8, u8)>,
-    pos: usize,
+    head: usize,
+    tail: usize,
 }
 
 impl ReadBuffer {
@@ -472,29 +471,40 @@ impl ReadBuffer {
     pub fn with_capacity(cap: usize) -> Self {
         ReadBuffer {
             buf: Vec::with_capacity(cap),
-            pos: 0,
+            head: 0,
+            tail: 0,
         }
     }
 
     #[inline(always)]
     pub fn reset(&mut self) {
         self.buf.truncate(0);
-        self.pos = 0;
+        self.head = 0;
+        self.tail = 0;
     }
 
     #[inline(always)]
-    pub fn push(&mut self, i: u32, c0: u8, c1: u8) {
-        self.buf.push((i, c0, c1));
-    }
-
-    #[inline(always)]
-    pub fn get(&mut self, i: usize) -> Option<(u8, u8)> {
-        if self.pos >= self.buf.len() {
+    pub fn get_front(&mut self, i: usize) -> Option<(u8, u8)> {
+        if self.head >= self.tail {
             return None;
         }
-        let record = self.buf[self.pos];
+        let record = self.buf[self.head];
         if i as u32 == record.0 {
-            self.pos += 1;
+            self.head += 1;
+            Some((record.1, record.2))
+        } else {
+            None
+        }
+    }
+
+    #[inline(always)]
+    pub fn get_back(&mut self, i: usize) -> Option<(u8, u8)> {
+        if self.tail <= self.head {
+            return None;
+        }
+        let record = self.buf[self.tail - 1];
+        if i as u32 == record.0 {
+            self.tail -= 1;
             Some((record.1, record.2))
         } else {
             None
