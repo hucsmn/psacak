@@ -5,13 +5,12 @@ use scoped_threadpool::{Pool, Scope};
 
 /// Pipeline infrastructure for paralleled induce sorting.
 pub struct Pipeline {
-    pool: Pool,
+    pool: Option<Pool>,
 }
 
 impl Pipeline {
     pub fn new() -> Self {
-        let pool = Pool::new(2);
-        Pipeline { pool }
+        Pipeline { pool: None }
     }
 
     /// Start the induce pipeline.
@@ -23,11 +22,18 @@ impl Pipeline {
         FL: Fn(T) -> T + 'scope + Send,
         BODY: FnOnce(Worker<'scope, S>, Worker<'scope, T>) + 'scope + Send,
     {
-        self.pool.scoped(|scope| {
-            let pf = Worker::new(scope, prefetch);
-            let fl = Worker::new(scope, flush);
-            body(pf, fl);
-        });
+        if self.pool.is_none() {
+            self.pool = Some(Pool::new(2));
+        }
+        if let Some(ref mut pool) = self.pool {
+            pool.scoped(|scope| {
+                let pf = Worker::new(scope, prefetch);
+                let fl = Worker::new(scope, flush);
+                body(pf, fl);
+            });
+        } else {
+            unreachable!();
+        }
     }
 }
 

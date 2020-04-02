@@ -28,9 +28,9 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort lms-substrings.
     let mut bkt = Buckets::new(text);
-    let mut lazy_pipeline = None;
+    let mut pipeline = Pipeline::new();
     put_lmscharacters(text, suf, &mut bkt);
-    induce_sort(text, suf, &mut bkt, &mut lazy_pipeline, BLOCK_SIZE, true);
+    induce_sort(text, suf, &mut bkt, &mut pipeline, BLOCK_SIZE, true);
 
     // construct subproblem, compute its suffix array, and get sorted lms-suffixes.
     let n = compact_exclude(suf, 0, false);
@@ -50,7 +50,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssuffixes(text, suf, &mut bkt, n);
-    induce_sort(text, suf, &mut bkt, &mut lazy_pipeline, BLOCK_SIZE, false);
+    induce_sort(text, suf, &mut bkt, &mut pipeline, BLOCK_SIZE, false);
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
@@ -110,17 +110,12 @@ fn induce_sort(
     text: &[u8],
     suf: &mut [u32],
     bkt: &mut Buckets,
-    lazy_pipeline: &mut Option<Pipeline>,
+    pipeline: &mut Pipeline,
     block_size: usize,
     left_most: bool,
 ) {
     if text.len() > THRESHOLD_PARALLEL_INDUCE {
-        if lazy_pipeline.is_none() {
-            *lazy_pipeline = Some(Pipeline::new());
-        }
-        if let Some(pipeline) = lazy_pipeline {
-            par_induce_sort(text, suf, bkt, pipeline, block_size, left_most);
-        }
+        par_induce_sort(text, suf, bkt, pipeline, block_size, left_most);
     } else {
         nonpar_induce_sort(text, suf, bkt, left_most);
     }
