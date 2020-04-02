@@ -221,7 +221,7 @@ fn par_induce_sort(
         }
         p += 1;
 
-        // initialize worker states.
+        // worker states.
         let mut rbuf = ReadBuffer::with_capacity(block_size);
         let mut wbuf = WriteBuffer::with_capacity(block_size);
         let mut prefetch_state;
@@ -243,17 +243,17 @@ fn par_induce_sort(
 
             // wait prefetch B[i], start prefetch B[i+1].
             prefetch_state = prefetch.wait();
-            swap(&mut rbuf, &mut prefetch_state.1);
             unsafe {
                 suf.slice(end..bound).copy_exclude(&mut prefetch_state.0, 0);
             }
+            swap(&mut rbuf, &mut prefetch_state.1);
             prefetch.start(prefetch_state);
 
             // induce_lchars B[i].
             for i in start..end {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
-                    // query the prefetched buffer.
+                    // query the read buffer.
                     let j = (x - 1) as usize;
                     let (c0, c1) = rbuf.get_front(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
@@ -265,10 +265,10 @@ fn par_induce_sort(
 
                     if c0 >= c1 {
                         if p < bound {
-                            // direct writes to B[i] and B[i+1].
+                            // directly write B[i] and B[i+1].
                             unsafe { suf.set(p, j as u32) }
                         } else {
-                            // deferred writes to B[i+2..].
+                            // push the write buffer.
                             wbuf.defer(p as u32, j as u32);
                         }
                         p += 1;
@@ -291,7 +291,7 @@ fn par_induce_sort(
 
         // stage 2. induce s or (lms) from l (or lml).
 
-        // start prefetch B_rev[0].
+        // start prefetch Brev[0].
         prefetch_state = prefetch.wait();
         unsafe {
             suf.slice(suf.len().saturating_sub(block_size)..)
@@ -308,19 +308,19 @@ fn par_induce_sort(
             let end = start.saturating_sub(block_size);
             let bound = end.saturating_sub(block_size);
 
-            // wait prefetch B_rev[i], start prefetch B_rev[i+1].
+            // wait prefetch Brev[i], start prefetch Brev[i+1].
             prefetch_state = prefetch.wait();
-            swap(&mut rbuf, &mut prefetch_state.1);
             unsafe {
                 suf.slice(bound..end).copy_exclude(&mut prefetch_state.0, 0);
             }
+            swap(&mut rbuf, &mut prefetch_state.1);
             prefetch.start(prefetch_state);
 
-            // induce_schars B_rev[i].
+            // induce_schars Brev[i].
             for i in (end..start).rev() {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
-                    // query the prefetched buffer.
+                    // query the read buffer.
                     let j = (x - 1) as usize;
                     let (c0, c1) = rbuf.get_back(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
@@ -333,10 +333,10 @@ fn par_induce_sort(
                     if c0 <= c1 && p <= i {
                         p -= 1;
                         if p >= bound {
-                            // direct writes to B_rev[i] and B_rev[i+1].
+                            // directly write Brev[i] and Brev[i+1].
                             unsafe { suf.set(p, j as u32) }
                         } else {
-                            // deferred writes to B_rev[..i+2].
+                            // push the write buffer.
                             wbuf.defer(p as u32, j as u32);
                         }
                         if left_most {
@@ -346,7 +346,7 @@ fn par_induce_sort(
                 }
             }
 
-            // wait flush B_rev[..i+1], start flush B_rev[..i+2].
+            // wait flush Brev[..i+1], start flush Brev[..i+2].
             flush_state = flush.wait();
             swap(&mut wbuf, &mut flush_state);
             flush.start(flush_state);
@@ -569,42 +569,15 @@ mod tests {
         calc_sacak8(&text[..]) == calc_naive8(&text[..])
     }
 
-    #[test]
-    fn tablecheck_induce8() {
-        let texts: &[&[u8]] = &[
-            &[0, 0, 0, 0, 0, 0],
-            &[0, 0, 0, 0, 0, 1],
-            &[5, 4, 3, 2, 1, 0],
-            &[3, 4, 5, 2, 0, 1],
-            &[2, 0, 2, 0, 2, 1, 4, 3],
-            &[3, 2, 1, 3, 2, 3, 2, 1, 0, 1],
-            &[2, 1, 4, 1, 1, 4, 1, 3, 1],
-            &[2, 1, 1, 3, 3, 1, 1, 3, 3, 1, 2, 1],
-            &[2, 2, 1, 4, 4, 1, 4, 4, 1, 3, 3, 1, 1],
-            &[6, 8, 9, 5, 2, 4, 3, 0, 0, 7, 1, 2],
-            &[
-                1, 2, 2, 1, 1, 0, 0, 1, 1, 2, 2, 0, 0, 2, 2, 0, 1, 0, 2, 0, 1, 1, 1, 1, 2, 2, 0, 0, 2, 1, 2, 1, 1, 0,
-                2, 1, 2, 2, 0, 2, 1, 1, 2, 2, 2, 1, 2, 0, 0, 1, 2, 0, 0, 0, 1, 2, 2, 2, 1, 1, 1, 1, 2, 0, 2, 1, 1, 1,
-                2, 1, 0, 1,
-            ],
-        ];
-
-        for &text in texts.iter() {
-            for block_size in 1..(2 * text.len()) {
-                assert_eq!(calc_nonpar_lms_induce(text), calc_par_lms_induce(text, block_size));
-            }
-        }
-    }
-
     #[quickcheck]
-    fn quickcheck_induce8(text: Vec<u8>, block_size: usize) -> bool {
-        if text.len() < 3 || block_size < 1 {
+    fn quickcheck_parinduce8(text: Vec<u8>, block_size: usize) -> bool {
+        if text.len() == 0 || block_size == 0 {
             return true;
         }
         calc_nonpar_lms_induce(&text[..]) == calc_par_lms_induce(&text[..], block_size)
     }
 
-    // helper funtions.
+    // helper functions.
 
     fn calc_sacak8(text: &[u8]) -> Vec<u32> {
         let mut suf = vec![0u32; text.len()];

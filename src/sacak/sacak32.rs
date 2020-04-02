@@ -297,7 +297,7 @@ mod tests {
         calc_sacak32(&text[..]) == calc_naive(&text[..])
     }
 
-    // helper funtions.
+    // helper functions.
 
     fn calc_sacak32(text: &[u32]) -> Vec<u32> {
         let (mut text, k) = reduce_alphabet(text);

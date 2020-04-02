@@ -218,7 +218,9 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
         AtomicSlice { slice }
     }
 
-    /// Overwrite destination vector with the whole slice.
+    /// Overwrite destination vector with this slice.
+    ///
+    /// Element copying is not guaranteed to be atomic.
     #[inline]
     pub unsafe fn copy_exclude(&self, dest: &mut Vec<T>, exclude: T) {
         dest.resize(self.len(), T::ZERO);

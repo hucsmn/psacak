@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crossbeam::channel::{self, Receiver, Sender};
 use scoped_threadpool::{Pool, Scope};
 
-/// Pipeline infrastructure for paralleled induce sorting.
+/// Pipeline infrastructure for induce sorting in parallel.
 pub struct Pipeline {
     pool: Option<Pool>,
 }

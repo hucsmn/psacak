@@ -36,7 +36,7 @@ where
     I: SacaIndex + SacaChar,
     FP: Fingerprint<C>,
 {
-    if n < PARALLEL_NAME_THRESHOLD || n < rayon::current_num_threads() + 1 {
+    if n < PARALLEL_NAME_THRESHOLD || n <= rayon::current_num_threads() {
         // serial version, for small amount of lms-substrings.
         nonpar_name_lmssubstrings_using::<C, I, FP>(text, suf, n)
     } else if text.len() <= I::LOWER_BITS.as_index() {
@@ -182,7 +182,7 @@ where
     // compare lms-substrings in parallel, allocating `2 * jobs * I::SIZE` extra space.
     let (lmssubs, work) = suf.split_at_mut(n);
     let chunk_size = ceil_divide(n - 1, jobs);
-    let i0s = (0..jobs)
+    let i0s = (0..ceil_divide(n - 1, chunk_size))
         .into_iter()
         .map(|i| lmssubs[i * chunk_size])
         .collect::<Vec<_>>();
@@ -430,5 +430,66 @@ where
     for i in 0..n {
         let j = suf[i].as_index();
         suf[i] = suf[p + j];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::common::*;
+    use super::super::types::*;
+    use super::*;
+
+    macro_rules! quickcheck_naming {
+        ($($par_name:ident $fastpar_name:ident : $chr:ty, $idx:ty, $fp:ty;)*) => {
+            $(
+                #[quickcheck]
+                fn $par_name(text: Vec<$chr>) -> bool {
+                    let (n, mut suf0) = make_workspace::<$chr, $idx>(&text[..]);
+                    if n < rayon::current_num_threads() + 1 {
+                        return true;
+                    }
+                    let mut suf1 = suf0.clone();
+                    nonpar_name_lmssubstrings_using::<$chr, $idx, $fp>(&text[..], &mut suf0[..], n);
+                    par_name_lmssubstrings_using::<$chr, $idx, $fp>(&text[..], &mut suf1[..], n);
+                    suf0[suf0.len()-n..] == suf1[suf1.len()-n..]
+                }
+
+                #[quickcheck]
+                fn $fastpar_name(text: Vec<$chr>) -> bool {
+                    let (n, mut suf0) = make_workspace::<$chr, $idx>(&text[..]);
+                    if n <= rayon::current_num_threads() || n > <$idx>::LOWER_BITS as usize {
+                        return true;
+                    }
+                    let mut suf1 = suf0.clone();
+                    nonpar_name_lmssubstrings_using::<$chr, $idx, $fp>(&text[..], &mut suf0[..], n);
+                    fastpar_name_lmssubstrings_using::<$chr, $idx, $fp>(&text[..], &mut suf1[..], n);
+                    suf0[suf0.len()-n..] == suf1[suf1.len()-n..]
+                }
+            )*
+        };
+    }
+
+    quickcheck_naming! {
+        quickcheck_parnaming8_lenfp   quickcheck_fparnaming8_lenfp:   u8,  u32, usize;
+        quickcheck_parnaming32_lenfp  quickcheck_fparnaming32_lenfp:  u32, u32, usize;
+        quickcheck_parnaming8_u128fp  quickcheck_fparnaming8_u128fp:  u8,  u32, UintFingerprint<u128>;
+        quickcheck_parnaming32_u128fp quickcheck_fparnaming32_u128fp: u32, u32, UintFingerprint<u128>;
+    }
+
+    // helper functions.
+
+    fn make_workspace<C, I>(text: &[C]) -> (usize, Vec<I>)
+    where
+        C: SacaChar,
+        I: SacaIndex,
+    {
+        let mut suf = Vec::with_capacity(text.len());
+        foreach_lmschars(text, |i, _| {
+            suf.push(I::from_index(i));
+        });
+        let n = suf.len();
+        suf.sort_by(|&i, &j| Ord::cmp(&text[i.as_index()..], &text[j.as_index()..]));
+        suf.resize(text.len(), I::ZERO);
+        (n, suf)
     }
 }
