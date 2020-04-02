@@ -14,7 +14,7 @@ use super::types::*;
 const BLOCK_SIZE: usize = 128 * 1024;
 
 /// Threshold to enable paralled induce sorting.
-const THRESHOLD_PARALLEL_INDUCE: usize = 16 * 1024 * 1024;
+const THRESHOLD_PARALLEL_INDUCE: usize = 4 * 1024 * 1024;
 
 /// Initial level of SACA-K for byte strings.
 #[inline]
