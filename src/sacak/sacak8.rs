@@ -205,12 +205,12 @@ fn par_induce_sort(
     left_most: bool,
 ) {
     let suf = AtomicSlice::new(suf);
-    let prefetch_worker = |(block, mut rbuf)| {
-        prefetch_procedure(text, &block, &mut rbuf);
-        (block, rbuf)
+    let prefetch_worker = |(filtered_block, mut rbuf): (Vec<u32>, ReadBuffer)| {
+        rbuf.prefetch(text, &filtered_block);
+        (filtered_block, rbuf)
     };
-    let flush_worker = |mut wbuf| {
-        flush_procedure(&suf, &mut wbuf);
+    let flush_worker = |mut wbuf: WriteBuffer| {
+        wbuf.flush(&suf);
         wbuf
     };
     pipeline.begin(prefetch_worker, flush_worker, |prefetch, flush| {
@@ -274,7 +274,7 @@ fn par_induce_sort(
                             unsafe { suf.set(p, j as u32) }
                         } else {
                             // deferred writes to B[i+2..].
-                            wbuf.push(p as u32, j as u32);
+                            wbuf.defer(p as u32, j as u32);
                         }
                         p += 1;
                         if left_most {
@@ -342,7 +342,7 @@ fn par_induce_sort(
                             unsafe { suf.set(p, j as u32) }
                         } else {
                             // deferred writes to B_rev[..i+2].
-                            wbuf.push(p as u32, j as u32);
+                            wbuf.defer(p as u32, j as u32);
                         }
                         if left_most {
                             unsafe { suf.set(i, 0) }
@@ -361,39 +361,6 @@ fn par_induce_sort(
         prefetch.wait();
         flush.wait();
     });
-}
-
-/// Prefetch procedure for paralleled induce sorting.
-#[inline(always)]
-fn prefetch_procedure(text: &[u8], block: &Vec<u32>, rbuf: &mut ReadBuffer) {
-    rbuf.reset();
-    rbuf.buf.par_extend(
-        block
-            .par_iter()
-            .map(|&i| (i - 1, text[i as usize - 1], text[i as usize])),
-    );
-    rbuf.tail = rbuf.buf.len();
-}
-
-/// Flush procedure for paralleled induce sorting.
-#[inline(always)]
-fn flush_procedure<'a>(suf: &AtomicSlice<'a, u32>, wbuf: &mut WriteBuffer) {
-    if wbuf.buf.len() <= rayon::current_num_threads() {
-        wbuf.buf.par_iter().for_each(|&(i, x)| unsafe {
-            suf.set(i as usize, x);
-        });
-    } else {
-        wbuf.buf
-            .par_chunks(ceil_divide(wbuf.buf.len(), rayon::current_num_threads()))
-            .for_each(|chunk| {
-                for (i, x) in chunk.iter().cloned() {
-                    unsafe {
-                        suf.set(i as usize, x);
-                    }
-                }
-            });
-    }
-    wbuf.reset();
 }
 
 /// Bucket pointers and lms-character counters for byte string.
@@ -458,7 +425,7 @@ impl IndexMut<u8> for Buckets {
     }
 }
 
-/// Read buffer for paralleled induce sorting.
+/// Sequential read buffer for induce sorting in parallel.
 #[derive(Debug)]
 struct ReadBuffer {
     buf: Vec<(u32, u8, u8)>,
@@ -510,9 +477,21 @@ impl ReadBuffer {
             None
         }
     }
+
+    /// Fetch text to the read buffer in parallel using filtered sequence of indices.
+    #[inline]
+    pub fn prefetch(&mut self, text: &[u8], filtered_block: &Vec<u32>) {
+        self.reset();
+        self.buf.par_extend(
+            filtered_block
+                .par_iter()
+                .map(|&i| (i - 1, text[i as usize - 1], text[i as usize])),
+        );
+        self.tail = self.buf.len();
+    }
 }
 
-/// Random write buffer for parallel induce sorting.
+/// Random write buffer for induce sorting in parallel.
 #[derive(Debug)]
 struct WriteBuffer {
     buf: Vec<(u32, u32)>,
@@ -531,8 +510,29 @@ impl WriteBuffer {
     }
 
     #[inline(always)]
-    pub fn push(&mut self, i: u32, x: u32) {
+    pub fn defer(&mut self, i: u32, x: u32) {
         self.buf.push((i, x));
+    }
+
+    /// Flush the write buffer in parallel.
+    #[inline]
+    pub fn flush<'a>(&mut self, suf: &AtomicSlice<'a, u32>) {
+        if self.buf.len() <= rayon::current_num_threads() {
+            self.buf.par_iter().for_each(|&(i, x)| unsafe {
+                suf.set(i as usize, x);
+            });
+        } else {
+            self.buf
+                .par_chunks(ceil_divide(self.buf.len(), rayon::current_num_threads()))
+                .for_each(|chunk| {
+                    for (i, x) in chunk.iter().cloned() {
+                        unsafe {
+                            suf.set(i as usize, x);
+                        }
+                    }
+                });
+        }
+        self.reset();
     }
 }
 
