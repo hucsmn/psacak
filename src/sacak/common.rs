@@ -113,82 +113,98 @@ where
     }
 }
 
-/// Compact all the elements that not eqauls to `exclude` to the left (or right) side of array.
+/// Compact all the elements that not eqauls to `except` to the left side of array.
 ///
 /// Returns count of collected elements.
 #[inline]
-pub fn compact_exclude<T: Uint>(data: &mut [T], exclude: T, right_side: bool) -> usize {
-    if !right_side {
-        let mut n = 0;
-        for i in 0..data.len() {
-            let x = data[i];
-            if x != exclude {
-                data[n] = x;
-                n += 1;
-            }
+pub fn compact_left<T: Uint>(data: &mut [T], except: T) -> usize {
+    let mut n = 0;
+    for i in 0..data.len() {
+        let x = data[i];
+        if x != except {
+            data[n] = x;
+            n += 1;
         }
-        n
-    } else {
-        let mut p = data.len();
-        for i in (0..data.len()).rev() {
-            let x = data[i];
-            if x != exclude {
-                p -= 1;
-                data[p] = x;
-            }
-        }
-        data.len() - p
     }
+    n
 }
 
-/// Compact all the elements in given range of value to the left (or right) side of array.
+/// Compact all the elements that not eqauls to `except` to the right side of array.
 ///
 /// Returns count of collected elements.
 #[inline]
-pub fn compact_include<T, R>(data: &mut [T], include: R, right_side: bool) -> usize
+pub fn compact_right<T: Uint>(data: &mut [T], except: T) -> usize {
+    let mut p = data.len();
+    for i in (0..data.len()).rev() {
+        let x = data[i];
+        if x != except {
+            p -= 1;
+            data[p] = x;
+        }
+    }
+    data.len() - p
+}
+
+/// Compact all the elements in given range of value to the left side of array.
+///
+/// Returns count of collected elements.
+#[inline]
+pub fn compact_left_range<T, R>(data: &mut [T], range: R) -> usize
 where
     T: Uint,
     R: RangeBounds<T>,
 {
-    let ge = match include.start_bound() {
+    let low = match range.start_bound() {
         Bound::Included(&x) => x,
         Bound::Excluded(&x) => x.saturating_add(T::ONE),
         Bound::Unbounded => T::ZERO,
     };
-    let le = match include.end_bound() {
+    let high = match range.end_bound() {
         Bound::Included(&x) => x,
         Bound::Excluded(&x) => x.saturating_sub(T::ONE),
         Bound::Unbounded => T::MAX,
     };
-    compact_between(data, ge, le, right_side)
+
+    let mut n = 0;
+    for i in 0..data.len() {
+        let x = data[i];
+        if x >= low && x <= high {
+            data[n] = x;
+            n += 1;
+        }
+    }
+    n
 }
 
-/// Compact all the elements that in range `ge..=le` to the left (or right) side of array.
+/// Compact all the elements in given range of value to the right side of array.
 ///
 /// Returns count of collected elements.
-#[inline(always)]
-fn compact_between<T: Uint>(data: &mut [T], low: T, high: T, right_side: bool) -> usize {
-    if !right_side {
-        let mut n = 0;
-        for i in 0..data.len() {
-            let x = data[i];
-            if x >= low && x <= high {
-                data[n] = x;
-                n += 1;
-            }
+#[inline]
+pub fn compact_right_range<T, R>(data: &mut [T], range: R) -> usize
+where
+    T: Uint,
+    R: RangeBounds<T>,
+{
+    let low = match range.start_bound() {
+        Bound::Included(&x) => x,
+        Bound::Excluded(&x) => x.saturating_add(T::ONE),
+        Bound::Unbounded => T::ZERO,
+    };
+    let high = match range.end_bound() {
+        Bound::Included(&x) => x,
+        Bound::Excluded(&x) => x.saturating_sub(T::ONE),
+        Bound::Unbounded => T::MAX,
+    };
+
+    let mut p = data.len();
+    for i in (0..data.len()).rev() {
+        let x = data[i];
+        if x >= low && x <= high {
+            p -= 1;
+            data[p] = x;
         }
-        n
-    } else {
-        let mut p = data.len();
-        for i in (0..data.len()).rev() {
-            let x = data[i];
-            if x >= low && x <= high {
-                p -= 1;
-                data[p] = x;
-            }
-        }
-        data.len() - p
     }
+    data.len() - p
 }
 
 /// Calculate `ceil(x/y)`.
@@ -225,7 +241,7 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     pub unsafe fn copy_exclude(&self, dest: &mut Vec<T>, exclude: T) {
         dest.resize(self.len(), T::ZERO);
         dest.copy_from_slice(self.slice);
-        let n = compact_exclude(&mut dest[..], exclude, false);
+        let n = compact_left(&mut dest[..], exclude);
         dest.truncate(n);
     }
 
@@ -274,8 +290,8 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::*;
+    use super::*;
 
     #[quickcheck]
     fn quickcheck_foreach_typedchars(text: Vec<u8>) -> bool {
@@ -305,7 +321,7 @@ mod tests {
         foreach_typedchars(&text[..], |i, t, _| {
             types[i] = t;
         });
-    
+
         let mut success = true;
         let mut prev_i = text.len();
         foreach_typedchars_mut(&mut text[..], |i, t, _| {
@@ -351,7 +367,7 @@ mod tests {
 
     fn is_stype(text: &[u8], i: usize) -> bool {
         let c0 = text[i];
-        for j in i+1..text.len() {
+        for j in i + 1..text.len() {
             let c1 = text[j];
             if c0 > c1 {
                 return false;
@@ -366,7 +382,7 @@ mod tests {
         if i == 0 {
             return false;
         }
-        let c0 = text[i-1];
+        let c0 = text[i - 1];
         let c1 = text[i];
         if c0 == c1 {
             false

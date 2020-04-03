@@ -22,7 +22,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32]) {
     induce_sort(text, suf, true);
 
     // construct subproblem, compute its suffix array, and get sorted lms-suffixes.
-    let n = compact_include(suf, 1..EMPTY, false);
+    let n = compact_left_range(suf, 1..EMPTY);
     let k = name_lmssubstrings(text, suf, n);
     if k < n {
         // need to solve the subproblem recursively.

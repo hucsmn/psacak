@@ -89,7 +89,7 @@ where
 
     // compact the interim subproblem, and translate characters.
     let p = work.len() - n;
-    compact_exclude(work, I::MAX, true);
+    compact_right(work, I::MAX);
     translate(&mut work[p..], &lmssubs[..k]);
     k
 }
@@ -162,7 +162,7 @@ where
 
     // compact the interim subproblem, and translate characters.
     let p = work.len() - n;
-    compact_exclude(work, I::LOWER_BITS, true);
+    compact_right(work, I::LOWER_BITS);
     translate(&mut work[p..], &lmssubs[..k]);
     k
 }
@@ -257,7 +257,7 @@ where
 
     // compact the interim subproblem, and translate characters.
     let p = work.len() - n;
-    compact_exclude(work, I::MAX, true);
+    compact_right(work, I::MAX);
     translate(&mut work[p..], &lmssubs[..k]);
     k
 }
