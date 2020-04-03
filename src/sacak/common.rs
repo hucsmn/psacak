@@ -17,7 +17,7 @@ where
 }
 
 /// Character type.
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Default, Debug, Eq, PartialEq)]
 pub struct SacaCharType {
     pub stype: bool,
     pub left_most: bool,
@@ -269,5 +269,111 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     #[inline(always)]
     pub fn fence(&self, order: Ordering) {
         std::sync::atomic::fence(order)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::types::*;
+
+    #[quickcheck]
+    fn quickcheck_foreach_typedchars(text: Vec<u8>) -> bool {
+        let mut success = true;
+        let mut prev_i = text.len();
+        foreach_typedchars(&text[..], |i, t, c| {
+            if prev_i != i + 1 {
+                success = false;
+            }
+            if t.stype != is_stype(&text[..], i) {
+                success = false;
+            }
+            if t.left_most != is_left_most(&text[..], i) {
+                success = false;
+            }
+            if c != text[i] {
+                success = false;
+            }
+            prev_i = i;
+        });
+        success
+    }
+
+    #[quickcheck]
+    fn quickcheck_foreach_typedchars_mut(mut text: Vec<u8>) -> bool {
+        let mut types = vec![SacaCharType::default(); text.len()];
+        foreach_typedchars(&text[..], |i, t, _| {
+            types[i] = t;
+        });
+    
+        let mut success = true;
+        let mut prev_i = text.len();
+        foreach_typedchars_mut(&mut text[..], |i, t, _| {
+            if prev_i != i + 1 {
+                success = false;
+            }
+            if types[i] != t {
+                success = false;
+            }
+            prev_i = i;
+        });
+        success
+    }
+
+    #[quickcheck]
+    fn quickcheck_foreach_lmschars(text: Vec<u8>) -> bool {
+        let mut lmsmap = vec![false; text.len()];
+        foreach_typedchars(&text[..], |i, t, _| {
+            if t.is_lms() {
+                lmsmap[i] = true;
+            }
+        });
+
+        let mut success = true;
+        let mut prev_i = text.len();
+        foreach_lmschars(&text[..], |i, _| {
+            if prev_i <= i {
+                success = false;
+            }
+            if !lmsmap[i] {
+                success = false;
+            }
+            lmsmap[i] = false;
+            prev_i = i;
+        });
+        if lmsmap.into_iter().any(|lms| lms) {
+            success = false;
+        }
+        success
+    }
+
+    // helper functions.
+
+    fn is_stype(text: &[u8], i: usize) -> bool {
+        let c0 = text[i];
+        for j in i+1..text.len() {
+            let c1 = text[j];
+            if c0 > c1 {
+                return false;
+            } else if c0 < c1 {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn is_left_most(text: &[u8], i: usize) -> bool {
+        if i == 0 {
+            return false;
+        }
+        let c0 = text[i-1];
+        let c1 = text[i];
+        if c0 == c1 {
+            false
+        } else if is_stype(text, i) {
+            c0 > c1
+        } else {
+            c0 < c1
+        }
     }
 }

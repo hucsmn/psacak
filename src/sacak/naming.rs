@@ -470,10 +470,9 @@ mod tests {
     }
 
     quickcheck_naming! {
-        quickcheck_parnaming8_lenfp   quickcheck_fparnaming8_lenfp:   u8,  u32, usize;
-        quickcheck_parnaming32_lenfp  quickcheck_fparnaming32_lenfp:  u32, u32, usize;
-        quickcheck_parnaming8_u128fp  quickcheck_fparnaming8_u128fp:  u8,  u32, UintFingerprint<u128>;
-        quickcheck_parnaming32_u128fp quickcheck_fparnaming32_u128fp: u32, u32, UintFingerprint<u128>;
+        quickcheck_par_naming_lenfp    quickcheck_fastpar_naming_lenfp:    u8,  u32, usize;
+        quickcheck_par_naming8_u128fp  quickcheck_fastpar_naming8_u128fp:  u8,  u32, UintFingerprint<u128>;
+        quickcheck_par_naming32_u128fp quickcheck_fastpar_naming32_u128fp: u32, u32, UintFingerprint<u128>;
     }
 
     // helper functions.
