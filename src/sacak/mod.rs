@@ -1,4 +1,3 @@
-#[macro_use]
 mod common;
 mod naming;
 mod pipeline;
