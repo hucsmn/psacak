@@ -264,7 +264,8 @@ fn to_counter(n: usize) -> u32 {
 mod tests {
     use super::super::common::*;
     use super::super::types::*;
-    use super::sacak32;
+    use super::*;
+
     use std::collections::BTreeMap;
 
     #[test]

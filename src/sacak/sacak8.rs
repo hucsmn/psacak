@@ -537,7 +537,7 @@ mod tests {
     use super::super::common::saca_tiny;
     use super::super::pipeline::Pipeline;
     use super::super::types::*;
-    use super::{nonpar_induce_sort, par_induce_sort, put_lmscharacters, sacak8, Buckets};
+    use super::*;
 
     #[test]
     fn tablecheck_sacak8() {
@@ -570,7 +570,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn quickcheck_parinduce8(text: Vec<u8>, block_size: usize) -> bool {
+    fn quickcheck_par_induce8(text: Vec<u8>, block_size: usize) -> bool {
         if text.len() == 0 || block_size == 0 {
             return true;
         }

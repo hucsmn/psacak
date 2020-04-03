@@ -74,3 +74,29 @@ impl<'scope, S: Send + 'scope> Worker<'scope, S> {
         self.output.recv().unwrap()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[quickcheck]
+    fn quickcheck_pipeline(data: Vec<u8>) -> bool {
+        let mut success = true;
+        let mut pipeline = Pipeline::new();
+        pipeline.begin(
+            |x| x ^ 0b11110000,
+            |x| x ^ 0b00001111,
+            |worker_a, worker_b| {
+                for x in data.into_iter() {
+                    worker_a.start(x);
+                    worker_b.start(x);
+                    if worker_a.wait() ^ worker_b.wait() != 0b11111111 {
+                        success = false;
+                        break;
+                    }
+                }
+            },
+        );
+        success
+    }
+}
