@@ -512,21 +512,9 @@ impl WriteBuffer {
     /// Flush the write buffer in parallel.
     #[inline]
     pub fn flush<'a>(&mut self, suf: &AtomicSlice<'a, u32>) {
-        if self.buf.len() <= rayon::current_num_threads() {
-            self.buf.par_iter().for_each(|&(i, x)| unsafe {
-                suf.set(i as usize, x);
-            });
-        } else {
-            self.buf
-                .par_chunks(ceil_divide(self.buf.len(), rayon::current_num_threads()))
-                .for_each(|chunk| {
-                    for (i, x) in chunk.iter().cloned() {
-                        unsafe {
-                            suf.set(i as usize, x);
-                        }
-                    }
-                });
-        }
+        self.buf.par_iter().for_each(|&(i, x)| unsafe {
+            suf.set(i as usize, x);
+        });
         self.reset();
     }
 }
