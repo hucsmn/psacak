@@ -52,6 +52,7 @@ impl<'scope, S: Send + 'scope> OuterWorker<'scope, S> {
         let (insend, inrecv) = channel::bounded(0);
         let (outsend, outrecv) = channel::bounded(0);
         scope.execute(move || {
+            // channel send/recv and thread create/join would make synchronization.
             while let Ok(mut state) = inrecv.recv() {
                 state = action(state);
                 outsend.send(state).unwrap();

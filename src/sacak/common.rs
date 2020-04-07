@@ -1,6 +1,6 @@
 use std::mem::{align_of, size_of, transmute};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::{fence, AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 
 use super::types::*;
 
@@ -272,19 +272,13 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     /// Get element atomically.
     #[inline(always)]
     pub unsafe fn get(&self, i: usize) -> T {
-        T::Atomic::load(unsafe { transmute(&self.slice[i]) }, Ordering::Relaxed)
+        T::Atomic::load(transmute(&self.slice[i]), Ordering::Relaxed)
     }
 
     /// Set element atomically.
     #[inline(always)]
     pub unsafe fn set(&self, i: usize, x: T) {
-        T::Atomic::store(unsafe { transmute(&self.slice[i]) }, x, Ordering::Relaxed)
-    }
-
-    /// Explicit memory fence.
-    #[inline(always)]
-    pub fn fence(&self, order: Ordering) {
-        std::sync::atomic::fence(order)
+        T::Atomic::store(transmute(&self.slice[i]), x, Ordering::Relaxed)
     }
 }
 

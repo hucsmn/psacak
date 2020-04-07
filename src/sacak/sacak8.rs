@@ -1,6 +1,5 @@
 use std::mem::swap;
 use std::ops::{Index, IndexMut};
-use std::sync::atomic::Ordering;
 
 use rayon::prelude::*;
 
@@ -217,7 +216,6 @@ fn par_induce_sort(
         let mut p = bkt[prev_c0] as usize;
         unsafe {
             suf.set(p, (text.len() - 1) as u32);
-            suf.fence(Ordering::SeqCst);
         }
         p += 1;
 
