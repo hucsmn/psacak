@@ -1,5 +1,6 @@
 use super::common::*;
 use super::naming::*;
+use super::pipeline::*;
 use super::types::*;
 
 /// Empty symbol in workspace.
@@ -9,7 +10,7 @@ const EMPTY: u32 = 1 << 31;
 ///
 /// Assumes that characters are correctly translated to bucket pointers.
 #[inline]
-pub fn sacak32(text: &[u32], suf: &mut [u32]) {
+pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {
@@ -27,7 +28,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32]) {
     if k < n {
         // need to solve the subproblem recursively.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
-        sacak32(text1, suf1);
+        sacak32(text1, suf1, pipeline);
     } else {
         // the subproblem itself is the inversed suffix array.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
@@ -263,6 +264,7 @@ fn to_counter(n: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::super::common::*;
+    use super::super::pipeline::*;
     use super::super::types::*;
     use super::*;
 
@@ -308,7 +310,7 @@ mod tests {
             saca_tiny(&text[..], &mut suf[..]);
         } else {
             translate_text(&mut text[..], &mut suf[..], k);
-            sacak32(&text[..], &mut suf[..]);
+            sacak32(&text[..], &mut suf[..], &mut Pipeline::new());
         }
         suf
     }

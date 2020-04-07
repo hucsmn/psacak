@@ -38,7 +38,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     if k < n {
         // need to solve the subproblem recursively.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
-        sacak32(text1, suf1);
+        sacak32(text1, suf1, &mut pipeline);
     } else {
         // the subproblem itself is the inversed suffix array.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
@@ -208,7 +208,7 @@ fn par_induce_sort(
         wbuf.flush(&suf);
         wbuf
     };
-    pipeline.begin(fetch_worker, flush_worker, |fetch, flush| {
+    pipeline.outer_induce(fetch_worker, flush_worker, |fetch, flush| {
         // stage 1. induce l (or lml) from lms.
 
         // the sentinel.

@@ -13,22 +13,22 @@ impl Pipeline {
         Pipeline { pool: None }
     }
 
-    /// Start the induce pipeline.
-    pub fn begin<'scope, S, T, FETCH, FLUSH, INDUCE>(&mut self, fetch: FETCH, flush: FLUSH, induce: INDUCE)
+    /// Start the induce pipeline for outer level SACA-K.
+    pub fn outer_induce<'scope, S, T, FETCH, FLUSH, INDUCE>(&mut self, fetch: FETCH, flush: FLUSH, induce: INDUCE)
     where
         S: Send + 'scope,
         T: Send + 'scope,
         FETCH: Fn(S) -> S + 'scope + Send,
         FLUSH: Fn(T) -> T + 'scope + Send,
-        INDUCE: FnOnce(Worker<'scope, S>, Worker<'scope, T>) + 'scope + Send,
+        INDUCE: FnOnce(OuterWorker<'scope, S>, OuterWorker<'scope, T>) + 'scope + Send,
     {
         if self.pool.is_none() {
             self.pool = Some(Pool::new(2));
         }
         if let Some(ref mut pool) = self.pool {
             pool.scoped(|scope| {
-                let fetch_worker = Worker::new(scope, fetch);
-                let flush_worker = Worker::new(scope, flush);
+                let fetch_worker = OuterWorker::new(scope, fetch);
+                let flush_worker = OuterWorker::new(scope, flush);
                 induce(fetch_worker, flush_worker);
             });
         } else {
@@ -37,14 +37,14 @@ impl Pipeline {
     }
 }
 
-/// Worker thread controller.
-pub struct Worker<'scope, S: Send + 'scope> {
+/// Worker thread controller for outer level SACA-K.
+pub struct OuterWorker<'scope, S: Send + 'scope> {
     input: Sender<S>,
     output: Receiver<S>,
     _marker: PhantomData<&'scope S>,
 }
 
-impl<'scope, S: Send + 'scope> Worker<'scope, S> {
+impl<'scope, S: Send + 'scope> OuterWorker<'scope, S> {
     fn new<'pool, F>(scope: &Scope<'pool, 'scope>, action: F) -> Self
     where
         F: Fn(S) -> S + 'scope + Send,
@@ -57,7 +57,7 @@ impl<'scope, S: Send + 'scope> Worker<'scope, S> {
                 outsend.send(state).unwrap();
             }
         });
-        Worker {
+        OuterWorker {
             input: insend,
             output: outrecv,
             _marker: PhantomData,
@@ -80,10 +80,10 @@ mod tests {
     use super::*;
 
     #[quickcheck]
-    fn quickcheck_pipeline(data: Vec<u8>) -> bool {
+    fn quickcheck_pipeline_outer(data: Vec<u8>) -> bool {
         let mut success = true;
         let mut pipeline = Pipeline::new();
-        pipeline.begin(
+        pipeline.outer_induce(
             |x| x ^ 0b11110000,
             |x| x ^ 0b00001111,
             |worker_a, worker_b| {
