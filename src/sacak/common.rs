@@ -217,7 +217,7 @@ pub fn ceil_divide(x: usize, y: usize) -> usize {
     }
 }
 
-/// Atomic unsigned integer array reader/writer.
+/// Mutable atomic unsigned integer slice adaptor.
 #[derive(Debug)]
 pub struct AtomicSlice<'a, T: Uint + HasAtomic> {
     slice: &'a [T],
@@ -226,23 +226,12 @@ pub struct AtomicSlice<'a, T: Uint + HasAtomic> {
 unsafe impl<'a, T: Uint + HasAtomic> Sync for AtomicSlice<'a, T> {}
 
 impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
-    /// Create an atomic unsigned integer array reader/writer from a mutable slice.
+    /// Create new mutable atomic unsigned integer slice adaptor.
     #[inline]
     pub fn new(slice: &'a mut [T]) -> Self {
         assert_eq!(size_of::<T>(), size_of::<T::Atomic>());
         assert_eq!(0, (&slice[0] as *const T).align_offset(align_of::<T>()));
         AtomicSlice { slice }
-    }
-
-    /// Overwrite destination vector with this slice.
-    ///
-    /// Element copying is not guaranteed to be atomic.
-    #[inline]
-    pub unsafe fn copy_exclude(&self, dest: &mut Vec<T>, exclude: T) {
-        dest.resize(self.len(), T::ZERO);
-        dest.copy_from_slice(self.slice);
-        let n = compact_left(&mut dest[..], exclude);
-        dest.truncate(n);
     }
 
     /// Get slice length.
@@ -267,6 +256,17 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
         AtomicSlice {
             slice: &self.slice[start..end],
         }
+    }
+
+    /// Overwrite the destination vector to the elements excluding given value in this slice.
+    ///
+    /// Element copying is not guaranteed to be atomic.
+    #[inline]
+    pub unsafe fn copy_except(&self, dest: &mut Vec<T>, except: T) {
+        dest.resize(self.len(), T::ZERO);
+        dest.copy_from_slice(self.slice);
+        let n = compact_left(&mut dest[..], except);
+        dest.truncate(n);
     }
 
     /// Get element atomically.

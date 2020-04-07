@@ -6,9 +6,9 @@ use super::types::*;
 /// Empty symbol in workspace.
 const EMPTY: u32 = 1 << 31;
 
-/// Inner level of SACA-K for integer strings.
+/// The inner level SACA-K algorithm for unsigned integer strings.
 ///
-/// Assumes that characters are correctly translated to bucket pointers.
+/// Assumes that characters are correctly translated to corresponding bucket pointers.
 #[inline]
 pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
     let suf = &mut suf[..text.len()];
@@ -22,7 +22,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
     put_lmscharacters(text, suf);
     induce_sort(text, suf, true);
 
-    // construct subproblem, compute its suffix array, and get sorted lms-suffixes.
+    // construct the subproblem, compute its suffix array, and get sorted lms-suffixes.
     let n = compact_left_range(suf, 1..EMPTY);
     let k = name_lmssubstrings(text, suf, n);
     if k < n {
@@ -113,7 +113,7 @@ fn put_lmssuffixes(text: &[u32], suf: &mut [u32], n: usize) {
 fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
     // stage 1. induce l (or lml) from lms.
 
-    // the sentinel.
+    // induce from the sentinel.
     let p = text[text.len() - 1] as usize;
     if p + 1 < suf.len() && suf[p + 1] == EMPTY {
         suf[p] = to_counter(1);
@@ -165,14 +165,13 @@ fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
                     }
                 }
 
-                // manually clean up lms-suffixes.
+                // lms must be cleared, and only keep lml if left_most toggled.
                 let mut ltype = true;
                 if j + 2 < text.len() {
                     let c2 = text[j + 2];
                     ltype = c1 > c2 || (c1 == c2 && i > c1 as usize);
                 }
                 if left_most || !ltype {
-                    // only keep lml-suffixes if toggled left_most.
                     suf[i] = EMPTY;
                 }
             }
@@ -235,7 +234,7 @@ fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
                 }
 
                 if left_most {
-                    // only keep lms-suffixes if toggled left_most.
+                    // only keep lms.
                     suf[i] = EMPTY;
                 }
             }
@@ -260,7 +259,6 @@ fn to_counter(n: usize) -> u32 {
     (-(n as u32 as i32)) as u32
 }
 
-// Simple sacak32 tests.
 #[cfg(test)]
 mod tests {
     use super::super::common::*;

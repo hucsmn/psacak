@@ -1,5 +1,5 @@
 use std::mem::swap;
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, Range};
 
 use rayon::prelude::*;
 
@@ -9,13 +9,13 @@ use super::pipeline::*;
 use super::sacak32::sacak32;
 use super::types::*;
 
-/// Block size for paralled induce sorting.
+/// Block size for induce sorting in parallel.
 const BLOCK_SIZE: usize = 128 * 1024;
 
-/// Threshold to enable paralled induce sorting.
-const THRESHOLD_PARALLEL_INDUCE: usize = 4 * 1024 * 1024;
+/// Threshold to enable induce sorting in parallel.
+const THRESHOLD_PARALLEL_INDUCE: usize = 3 * BLOCK_SIZE;
 
-/// Initial level of SACA-K for byte strings.
+/// The outer level SACA-K algorithm for byte strings.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     let suf = &mut suf[..text.len()];
@@ -31,7 +31,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     put_lmscharacters(text, suf, &mut bkt);
     induce_sort(text, suf, &mut bkt, &mut pipeline, BLOCK_SIZE, true);
 
-    // construct subproblem, compute its suffix array, and get sorted lms-suffixes.
+    // construct the subproblem, compute its suffix array, and get sorted lms-suffixes.
     let n = compact_left(suf, 0);
     let k = name_lmssubstrings(text, suf, n);
     if k < n {
@@ -88,10 +88,10 @@ fn put_lmssuffixes(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize
 
 /// Copy within slice, and reset source area to given value.
 #[inline(always)]
-fn move_within<T: Copy>(slice: &mut [T], src: std::ops::Range<usize>, dest: usize, reset: T) {
+fn move_within<T: Copy>(slice: &mut [T], src: Range<usize>, dest: usize, reset: T) {
     let (i, j, k) = (src.start, src.end, dest);
     slice.copy_within(src, dest);
-    let blank = if dest > j {
+    let leave = if dest > j {
         i..j
     } else if dest > i {
         i..k
@@ -100,7 +100,7 @@ fn move_within<T: Copy>(slice: &mut [T], src: std::ops::Range<usize>, dest: usiz
     } else {
         i..j
     };
-    slice[blank].iter_mut().for_each(|p| *p = reset);
+    slice[leave].iter_mut().for_each(|p| *p = reset);
 }
 
 /// Induce sort all the suffixes (or lms-substrings) from the sorted lms-suffixes (or lms-characters).
@@ -114,8 +114,10 @@ fn induce_sort(
     left_most: bool,
 ) {
     if text.len() > THRESHOLD_PARALLEL_INDUCE {
+        // induce sort in parallel using pipeline.
         par_induce_sort(text, suf, bkt, pipeline, block_size, left_most);
     } else {
+        // induce sort in serial.
         nonpar_induce_sort(text, suf, bkt, left_most);
     }
 }
@@ -127,7 +129,7 @@ fn nonpar_induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most
 
     bkt.set_head();
 
-    // the sentinel.
+    // induce from the sentinel.
     let mut prev_c0 = text[text.len() - 1];
     let mut p = bkt[prev_c0] as usize;
     suf[p] = (text.len() - 1) as u32;
@@ -150,7 +152,7 @@ fn nonpar_induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most
                 suf[p] = j as u32;
                 p += 1;
                 if left_most {
-                    // only keep lml-suffixes.
+                    // only keep lml.
                     suf[i] = 0;
                 }
             }
@@ -180,7 +182,7 @@ fn nonpar_induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most
                 p -= 1;
                 suf[p] = j as u32;
                 if left_most {
-                    // only keep lms-suffixes.
+                    // only keep lms.
                     suf[i] = 0;
                 }
             }
@@ -188,7 +190,14 @@ fn nonpar_induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most
     }
 }
 
-/// Induce sort in parallel.
+/// Induce sort in parallel using pipeline.
+///
+/// For each stage of induce, every element in the workspace can be proved:
+///   1. read only once (sequentially, considering no prefetch)
+///   2. write at most once (before readed)
+///   3. clear at most once (immediately after readed)
+///
+/// Based on these, a pipeline is designed to improve throughput and avoid data races.
 #[inline]
 fn par_induce_sort(
     text: &[u8],
@@ -199,18 +208,27 @@ fn par_induce_sort(
     left_most: bool,
 ) {
     let suf = AtomicSlice::new(suf);
-    let fetch_worker = |(filtered_block, mut rbuf): (Vec<u32>, ReadBuffer)| {
-        rbuf.fetch(text, &filtered_block);
-        (filtered_block, rbuf)
+
+    // employ two paralleled worker to prefetch text and flush back workspace.
+    let fetch_worker = |(cache, mut rbuf): (Vec<u32>, ReadBuffer)| {
+        rbuf.fetch(text, &cache);
+        (cache, rbuf)
     };
     let flush_worker = |mut wbuf: WriteBuffer| {
         wbuf.flush(&suf);
         wbuf
     };
+
+    // the induce pipeline for outer level SACA-K.
     pipeline.outer_induce(fetch_worker, flush_worker, |fetch, flush| {
+        let mut rbuf = ReadBuffer::with_capacity(block_size); // read buffer owned by induce routine.
+        let mut wbuf = WriteBuffer::with_capacity(block_size); // write buffer owned by induce routine.
+        let mut fetch_state; // input for fetch worker, together with an owned read buffer.
+        let mut flush_state; // write buffer owned by flush worker.
+
         // stage 1. induce l (or lml) from lms.
 
-        // the sentinel.
+        // induce from the sentinel.
         bkt.set_head();
         let mut prev_c0 = text[text.len() - 1];
         let mut p = bkt[prev_c0] as usize;
@@ -219,22 +237,17 @@ fn par_induce_sort(
         }
         p += 1;
 
-        // worker states.
-        let mut rbuf = ReadBuffer::with_capacity(block_size);
-        let mut wbuf = WriteBuffer::with_capacity(block_size);
-        let mut fetch_state;
-        let mut flush_state;
-
         // start fetch B[0].
         fetch_state = (Vec::with_capacity(block_size), ReadBuffer::with_capacity(block_size));
         unsafe {
             suf.slice(..block_size.min(suf.len()))
-                .copy_exclude(&mut fetch_state.0, 0);
+                .copy_except(&mut fetch_state.0, 0);
         }
         fetch.start(fetch_state);
 
         // start the pipeline.
         for i in 0..ceil_divide(suf.len(), block_size) {
+            // block boundaries for B[i] and B[i+1].
             let start = i * block_size;
             let end = start.saturating_add(block_size).min(suf.len());
             let bound = end.saturating_add(block_size).min(suf.len());
@@ -242,7 +255,10 @@ fn par_induce_sort(
             // wait fetch B[i], start fetch B[i+1].
             fetch_state = fetch.wait();
             unsafe {
-                suf.slice(end..bound).copy_exclude(&mut fetch_state.0, 0);
+                // here is a potential data race.
+                // it might cause read buffer query misses, but the result is still correct,
+                // because atomic writes in the flush worker won't tear the words in workspace.
+                suf.slice(end..bound).copy_except(&mut fetch_state.0, 0);
             }
             swap(&mut rbuf, &mut fetch_state.1);
             fetch.start(fetch_state);
@@ -251,7 +267,7 @@ fn par_induce_sort(
             for i in start..end {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
-                    // query the read buffer.
+                    // query the read buffer, or fallback to fetch text by self.
                     let j = (x - 1) as usize;
                     let (c0, c1) = rbuf.pop_front(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
@@ -263,10 +279,11 @@ fn par_induce_sort(
 
                     if c0 >= c1 {
                         if p < bound {
-                            // directly write B[i] and B[i+1].
+                            // directly write to B[i] and B[i+1],
+                            // might cause read buffer query misses.
                             unsafe { suf.set(p, j as u32) }
                         } else {
-                            // push the write buffer.
+                            // push to the write buffer.
                             wbuf.defer(p as u32, j as u32);
                         }
                         p += 1;
@@ -289,11 +306,11 @@ fn par_induce_sort(
 
         // stage 2. induce s or (lms) from l (or lml).
 
-        // start fetch Brev[0].
+        // start fetch revB[0].
         fetch_state = fetch.wait();
         unsafe {
             suf.slice(suf.len().saturating_sub(block_size)..)
-                .copy_exclude(&mut fetch_state.0, 0);
+                .copy_except(&mut fetch_state.0, 0);
         }
         fetch.start(fetch_state);
 
@@ -302,23 +319,25 @@ fn par_induce_sort(
         let mut prev_c0 = 255;
         let mut p = bkt[prev_c0] as usize;
         for i in 0..ceil_divide(suf.len(), block_size) {
+            // block boundaries for revB[i] and revB[i+1].
             let start = suf.len() - (i * block_size);
             let end = start.saturating_sub(block_size);
             let bound = end.saturating_sub(block_size);
 
-            // wait fetch Brev[i], start fetch Brev[i+1].
+            // wait fetch revB[i], start fetch revB[i+1].
             fetch_state = fetch.wait();
             unsafe {
-                suf.slice(bound..end).copy_exclude(&mut fetch_state.0, 0);
+                // a potential data race here, not incorrect.
+                suf.slice(bound..end).copy_except(&mut fetch_state.0, 0);
             }
             swap(&mut rbuf, &mut fetch_state.1);
             fetch.start(fetch_state);
 
-            // induce_schars Brev[i].
+            // induce_schars revB[i].
             for i in (end..start).rev() {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
-                    // query the read buffer.
+                    // query the read buffer, or fallback to fetch text by self.
                     let j = (x - 1) as usize;
                     let (c0, c1) = rbuf.pop_back(j).unwrap_or_else(|| (text[j], text[j + 1]));
 
@@ -331,10 +350,11 @@ fn par_induce_sort(
                     if c0 <= c1 && p <= i {
                         p -= 1;
                         if p >= bound {
-                            // directly write Brev[i] and Brev[i+1].
+                            // directly write revB[i] and revB[i+1],
+                            // might cause read buffer query misses.
                             unsafe { suf.set(p, j as u32) }
                         } else {
-                            // push the write buffer.
+                            // push to the write buffer.
                             wbuf.defer(p as u32, j as u32);
                         }
                         if left_most {
@@ -344,13 +364,13 @@ fn par_induce_sort(
                 }
             }
 
-            // wait flush Brev[..i+1], start flush Brev[..i+2].
+            // wait flush revB[..i+1], start flush revB[..i+2].
             flush_state = flush.wait();
             swap(&mut wbuf, &mut flush_state);
             flush.start(flush_state);
         }
 
-        // wait fetch Brev[^], wait flush Brev[^].
+        // wait for workers done, then drop channels to shutdown the workers.
         fetch.wait();
         flush.wait();
     });
@@ -418,7 +438,7 @@ impl IndexMut<u8> for Buckets {
     }
 }
 
-/// Sequential read buffer for induce sorting in parallel.
+/// Read buffer deque for induce sorting in parallel.
 #[derive(Debug)]
 struct ReadBuffer {
     buf: Vec<(u32, u8, u8)>,
@@ -471,12 +491,12 @@ impl ReadBuffer {
         }
     }
 
-    /// Fetch text to the read buffer in parallel using filtered sequence of indices.
+    /// Fetch text in parallel to the read buffer, using cached block of non-zero indices.
     #[inline]
-    pub fn fetch(&mut self, text: &[u8], filtered_block: &Vec<u32>) {
+    pub fn fetch(&mut self, text: &[u8], cache: &Vec<u32>) {
         self.reset();
         self.buf.par_extend(
-            filtered_block
+            cache
                 .par_iter()
                 .map(|&i| (i - 1, text[i as usize - 1], text[i as usize])),
         );
@@ -484,7 +504,7 @@ impl ReadBuffer {
     }
 }
 
-/// Random write buffer for induce sorting in parallel.
+/// Write buffer for induce sorting in parallel.
 #[derive(Debug)]
 struct WriteBuffer {
     buf: Vec<(u32, u32)>,
@@ -510,6 +530,8 @@ impl WriteBuffer {
     /// Flush the write buffer in parallel.
     #[inline]
     pub fn flush<'a>(&mut self, suf: &AtomicSlice<'a, u32>) {
+        // the method that spilt and flush chunks of buffer in parallel is slower than
+        // simply utilizing the work-stealing thread pool to randomly flush the buffer.
         self.buf.par_iter().for_each(|&(i, x)| unsafe {
             suf.set(i as usize, x);
         });
@@ -517,7 +539,6 @@ impl WriteBuffer {
     }
 }
 
-// Simple sacak8 tests.
 #[cfg(test)]
 mod tests {
     use super::super::common::saca_tiny;
