@@ -1,5 +1,5 @@
 use std::mem::{align_of, size_of, transmute};
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Range, RangeBounds};
 use std::sync::atomic::Ordering;
 
 use super::types::*;
@@ -154,16 +154,7 @@ where
     T: Uint,
     R: RangeBounds<T>,
 {
-    let low = match range.start_bound() {
-        Bound::Included(&x) => x,
-        Bound::Excluded(&x) => x.saturating_add(T::ONE),
-        Bound::Unbounded => T::ZERO,
-    };
-    let high = match range.end_bound() {
-        Bound::Included(&x) => x,
-        Bound::Excluded(&x) => x.saturating_sub(T::ONE),
-        Bound::Unbounded => T::MAX,
-    };
+    let (low, high) = range_to_bounds(range);
 
     let mut n = 0;
     for i in 0..data.len() {
@@ -185,16 +176,7 @@ where
     T: Uint,
     R: RangeBounds<T>,
 {
-    let low = match range.start_bound() {
-        Bound::Included(&x) => x,
-        Bound::Excluded(&x) => x.saturating_add(T::ONE),
-        Bound::Unbounded => T::ZERO,
-    };
-    let high = match range.end_bound() {
-        Bound::Included(&x) => x,
-        Bound::Excluded(&x) => x.saturating_sub(T::ONE),
-        Bound::Unbounded => T::MAX,
-    };
+    let (low, high) = range_to_bounds(range);
 
     let mut p = data.len();
     for i in (0..data.len()).rev() {
@@ -205,6 +187,42 @@ where
         }
     }
     data.len() - p
+}
+
+/// Convert generic ranges to range bounds.
+#[inline(always)]
+fn range_to_bounds<T, R>(range: R) -> (T, T)
+where
+    T: Uint,
+    R: RangeBounds<T>,
+{
+    let low = match range.start_bound() {
+        Bound::Included(&x) => x,
+        Bound::Excluded(&x) => x.saturating_add(T::ONE),
+        Bound::Unbounded => T::ZERO,
+    };
+    let high = match range.end_bound() {
+        Bound::Included(&x) => x,
+        Bound::Excluded(&x) => x.saturating_sub(T::ONE),
+        Bound::Unbounded => T::MAX,
+    };
+    (low, high)
+}
+
+/// Normalize generic ranges of slice to the range type.
+#[inline(always)]
+fn normalize_range<R: RangeBounds<usize>>(range: R, len: usize) -> Range<usize> {
+    let start = match range.start_bound() {
+        Bound::Included(&x) => x,
+        Bound::Excluded(&x) => x.saturating_add(1),
+        Bound::Unbounded => 0,
+    };
+    let end = match range.end_bound() {
+        Bound::Included(&x) => x.saturating_add(1),
+        Bound::Excluded(&x) => x,
+        Bound::Unbounded => len,
+    };
+    start..end
 }
 
 /// Calculate `ceil(x/y)`.
@@ -229,7 +247,7 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     /// Create new mutable atomic unsigned integer slice adaptor.
     #[inline]
     pub fn new(slice: &'a mut [T]) -> Self {
-        assert_eq!(size_of::<T>(), size_of::<T::Atomic>());
+        // assert array is well-aligned.
         assert_eq!(0, (&slice[0] as *const T).align_offset(align_of::<T>()));
         AtomicSlice { slice }
     }
@@ -243,42 +261,35 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     /// Make subslice.
     #[inline(always)]
     pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Self {
-        let start = match range.start_bound() {
-            Bound::Included(&x) => x,
-            Bound::Excluded(&x) => x.saturating_add(1),
-            Bound::Unbounded => 0,
-        };
-        let end = match range.end_bound() {
-            Bound::Included(&x) => x.saturating_add(1),
-            Bound::Excluded(&x) => x,
-            Bound::Unbounded => self.len(),
-        };
         AtomicSlice {
-            slice: &self.slice[start..end],
+            slice: &self.slice[normalize_range(range, self.len())],
         }
-    }
-
-    /// Overwrite the destination vector to the elements excluding given value in this slice.
-    ///
-    /// Element copying is not guaranteed to be atomic.
-    #[inline]
-    pub unsafe fn copy_except(&self, dest: &mut Vec<T>, except: T) {
-        dest.resize(self.len(), T::ZERO);
-        dest.copy_from_slice(self.slice);
-        let n = compact_left(&mut dest[..], except);
-        dest.truncate(n);
     }
 
     /// Get element atomically.
     #[inline(always)]
     pub unsafe fn get(&self, i: usize) -> T {
+        // Atomic integers are guaranteed to have the same layout as the plain integers.
         T::Atomic::load(transmute(&self.slice[i]), Ordering::Relaxed)
     }
 
     /// Set element atomically.
     #[inline(always)]
     pub unsafe fn set(&self, i: usize, x: T) {
-        T::Atomic::store(transmute(&self.slice[i]), x, Ordering::Relaxed)
+        // Atomic integers are guaranteed to have the same layout as the plain integers.
+        T::Atomic::store(transmute(&self.slice[i]), x, Ordering::Relaxed);
+    }
+
+    /// Overwrite the destination vector to the elements excluding given value in this slice.
+    #[inline]
+    pub unsafe fn copy_except(&self, dest: &mut Vec<T>, except: T) {
+        dest.truncate(0);
+        for i in 0..self.len() {
+            let x = unsafe { self.get(i) };
+            if x != except {
+                dest.push(x);
+            }
+        }
     }
 }
 

@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::fmt::{Debug, Display};
 use std::ops::{Add, BitAnd, BitOr, BitXor, Not, Shl, Shr, Sub};
 use std::ops::{AddAssign, BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign, SubAssign};
-use std::sync::atomic::{AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{self, Ordering};
 
 // Cheap unsigned integer cast.
 pub trait As<T: Copy>: Copy {
@@ -163,6 +163,7 @@ macro_rules! impl_atomic {
             impl HasAtomic for $uint {
                 type Atomic = $atomic;
             }
+
             impl Atomic<$uint> for $atomic {
                 #[inline(always)]
                 fn new(val: $uint) -> Self {
@@ -208,7 +209,43 @@ macro_rules! impl_atomic {
     };
 }
 
-impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, u64 AtomicU64, usize AtomicUsize);
+// TODO: rewrite when `#[cfg(target_has_atomic = "<width>")]` comes to stable.
+cfg_if! {
+    if #[cfg(any(
+        all(target_arch = "x86_64", target_os="macos"),
+        all(target_arch = "aarch64", not(target_os="windows")),
+    ))]
+    {
+        // platforms support atomic u8..u128.
+        use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicU128, AtomicUsize};
+        impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, u64 AtomicU64, u128 AtomicU128, usize AtomicUsize);
+    } else if #[cfg(any(
+        target_arch = "x86_64",
+        target_arch = "x86",
+        target_arch = "aarch64",
+        target_arch = "mips64",
+        target_arch = "powerpc64",
+        target_arch = "riscv64",
+        target_arch = "sparc",
+        target_arch = "sparc64",
+    ))]
+    {
+        // platforms support atomic u8..u64.
+        use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicUsize};
+        impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, u64 AtomicU64, usize AtomicUsize);
+    } else if #[cfg(any(
+        target_arch = "arm",
+        target_arch = "mips",
+        target_arch = "powerpc",
+        target_arch = "wasm32",
+    ))]
+    {
+        // platforms support atomic u8..u32.
+        // known bug: target thumbv6m-none-eabi does not support atomic at all.
+        use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicUsize};
+        impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, usize AtomicUsize);
+    }
+}
 
 /// Types that could be casted into usize.
 pub trait AsIndex: Copy {

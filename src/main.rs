@@ -5,6 +5,8 @@ extern crate quickcheck;
 #[cfg(test)]
 #[macro_use(quickcheck)]
 extern crate quickcheck_macros;
+#[macro_use(cfg_if)]
+extern crate cfg_if;
 
 mod sacak;
 
