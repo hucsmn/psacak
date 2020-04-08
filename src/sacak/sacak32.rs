@@ -301,14 +301,11 @@ mod tests {
     // helper functions.
 
     fn calc_sacak32(text: &[u32]) -> Vec<u32> {
-        let (mut text, k) = reduce_alphabet(text);
         let mut suf = vec![0u32; text.len()];
-        if k >= text.len() {
-            // sacak32 cannot sort permutations, simply skip those test cases.
-            saca_tiny(&text[..], &mut suf[..]);
-        } else {
-            translate_text(&mut text[..], &mut suf[..], k);
+        if let Some(text) = translate_sample(text) {
             sacak32(&text[..], &mut suf[..], &mut Pipeline::new());
+        } else {
+            saca_tiny(&text[..], &mut suf[..]);
         }
         suf
     }
@@ -319,38 +316,36 @@ mod tests {
         suf
     }
 
-    fn reduce_alphabet(text: &[u32]) -> (Vec<u32>, usize) {
-        let mut ranking = BTreeMap::new();
+    fn translate_sample(text: &[u32]) -> Option<Vec<u32>> {
+        let mut bkt: BTreeMap<u32, (u32, u32)> = BTreeMap::new();
         for c in text.iter().cloned() {
-            ranking.insert(c, 0);
-        }
-        let mut k = 0;
-        for (_, rank) in &mut ranking {
-            *rank = k;
-            k += 1;
-        }
-        (text.iter().map(|c| *ranking.get(c).unwrap() as u32).collect(), k)
-    }
-
-    fn translate_text(text: &mut [u32], suf: &mut [u32], k: usize) {
-        suf[..k + 1].iter_mut().for_each(|p| *p = 0);
-        for c in text.iter().cloned() {
-            suf[c as usize + 1] += 1;
-        }
-        let mut p = 0;
-        for i in 1..k + 1 {
-            let cnt = suf[i];
-            suf[i] += p;
-            p += cnt;
-        }
-
-        foreach_typedchars_mut(text, |i, t, p| {
-            let c = *p as usize;
-            if !t.stype {
-                *p = suf[c];
-            } else if t.stype {
-                *p = suf[c + 1] - 1;
+            if let Some((count, _)) = bkt.get_mut(&c) {
+                *count += 1;
+            } else {
+                bkt.insert(c, (1, 0));
             }
-        })
+        }
+        if bkt.len() >= text.len() {
+            return None;
+        }
+
+        let mut sum = 0;
+        for (_, (left, right)) in &mut bkt {
+            let count = *left;
+            *left = sum;
+            sum += count;
+            *right = sum;
+        }
+
+        let mut text = Vec::from(text);
+        foreach_typedchars_mut(&mut text[..], |i, t, p| {
+            let c = *p;
+            if !t.stype {
+                *p = bkt.get(&c).unwrap().0;
+            } else if t.stype {
+                *p = bkt.get(&c).unwrap().1 - 1;
+            }
+        });
+        Some(text)
     }
 }
