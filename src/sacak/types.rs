@@ -265,13 +265,16 @@ macro_rules! impl_as_index {
     };
 }
 
-impl_as_index!(u8, u16, u32, usize);
-
 /// Text character type.
 pub trait SacaChar: Uint + HasAtomic + AsIndex {}
 
-impl SacaChar for u8 {}
-impl SacaChar for u32 {}
+macro_rules! impl_saca_char {
+    ($($uint:ty),*) => {
+        $(
+            impl SacaChar for $uint {}
+        )*
+    };
+}
 
 /// Suffix array index type.
 pub trait SacaIndex: Uint + HasAtomic + AsIndex {
@@ -291,4 +294,14 @@ macro_rules! impl_saca_index {
     };
 }
 
-impl_saca_index!(u32);
+cfg_if! {
+    if #[cfg(target_pointer_width="64")] {
+        impl_as_index!(u8, u16, u32, u64, usize);
+        impl_saca_char!(u8, u16, u32, u64);
+        impl_saca_index!(u32, u64);
+    } else if #[cfg(target_pointer_width="32")] {
+        impl_as_index!(u8, u16, u32, usize);
+        impl_saca_char!(u8, u16, u32);
+        impl_saca_index!(u32);
+    }
+}

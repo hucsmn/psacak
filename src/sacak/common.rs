@@ -285,7 +285,7 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     pub unsafe fn copy_except(&self, dest: &mut Vec<T>, except: T) {
         dest.truncate(0);
         for i in 0..self.len() {
-            let x = unsafe { self.get(i) };
+            let x = self.get(i);
             if x != except {
                 dest.push(x);
             }

@@ -18,6 +18,9 @@ const THRESHOLD_PARALLEL_INDUCE: usize = 3 * BLOCK_SIZE;
 /// The outer level SACA-K algorithm for byte strings.
 #[inline]
 pub fn sacak8(text: &[u8], suf: &mut [u32]) {
+    assert!(text.len() <= u32::MAX as usize);
+    assert!(text.len() <= suf.len());
+
     let suf = &mut suf[..text.len()];
 
     if text.len() <= 3 {
