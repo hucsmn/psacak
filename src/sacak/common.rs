@@ -2,6 +2,8 @@ use std::mem::{align_of, size_of, transmute};
 use std::ops::{Bound, Range, RangeBounds};
 use std::sync::atomic::Ordering;
 
+use rayon::prelude::*;
+
 use super::types::*;
 
 /// A stupid suffix array construction algorithm that handles tiny input.
@@ -280,16 +282,12 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
         T::Atomic::store(transmute(&self.slice[i]), x, Ordering::Relaxed);
     }
 
-    /// Overwrite the destination vector to the elements excluding given value in this slice.
+    // Create a parallel atomic iterator.
     #[inline]
-    pub unsafe fn copy_except(&self, dest: &mut Vec<T>, except: T) {
-        dest.truncate(0);
-        for i in 0..self.len() {
-            let x = self.get(i);
-            if x != except {
-                dest.push(x);
-            }
-        }
+    pub unsafe fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + 'a {
+        self.slice
+            .par_iter()
+            .map(|p| T::Atomic::load(transmute(p), Ordering::Relaxed))
     }
 }
 

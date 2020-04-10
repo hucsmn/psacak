@@ -213,9 +213,9 @@ fn par_induce_sort(
     let suf = AtomicSlice::new(suf);
 
     // employ two paralleled worker to prefetch text and flush back workspace.
-    let fetch_worker = |(cache, mut rbuf): (Vec<u32>, ReadBuffer)| {
-        rbuf.fetch(text, &cache);
-        (cache, rbuf)
+    let fetch_worker = |(range, mut rbuf): (Range<usize>, ReadBuffer)| {
+        rbuf.fetch(text, &suf, range.start..range.end);
+        (range, rbuf)
     };
     let flush_worker = |mut wbuf: WriteBuffer| {
         wbuf.flush(&suf);
@@ -226,7 +226,7 @@ fn par_induce_sort(
     pipeline.outer_induce(fetch_worker, flush_worker, |fetch, flush| {
         let mut rbuf = ReadBuffer::with_capacity(block_size); // read buffer owned by induce routine.
         let mut wbuf = WriteBuffer::with_capacity(block_size); // write buffer owned by induce routine.
-        let mut fetch_state; // input for fetch worker, together with an owned read buffer.
+        let mut fetch_state; // range of workspace, together with an owned read buffer.
         let mut flush_state; // write buffer owned by flush worker.
 
         // stage 1. induce l (or lml) from lms.
@@ -241,11 +241,7 @@ fn par_induce_sort(
         p += 1;
 
         // start fetch B[0].
-        fetch_state = (Vec::with_capacity(block_size), ReadBuffer::with_capacity(block_size));
-        unsafe {
-            suf.slice(..block_size.min(suf.len()))
-                .copy_except(&mut fetch_state.0, 0);
-        }
+        fetch_state = (0..block_size.min(suf.len()), ReadBuffer::with_capacity(block_size));
         fetch.start(fetch_state);
 
         // start the pipeline.
@@ -257,12 +253,7 @@ fn par_induce_sort(
 
             // wait fetch B[i], start fetch B[i+1].
             fetch_state = fetch.wait();
-            unsafe {
-                // here is a potential data race.
-                // it might cause read buffer query misses, but the result is still correct,
-                // because atomic writes in the flush worker won't tear the words in workspace.
-                suf.slice(end..bound).copy_except(&mut fetch_state.0, 0);
-            }
+            fetch_state.0 = end..bound;
             swap(&mut rbuf, &mut fetch_state.1);
             fetch.start(fetch_state);
 
@@ -270,9 +261,9 @@ fn par_induce_sort(
             for i in start..end {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
-                    // query the read buffer, or fallback to fetch text by self.
+                    // query the read buffer, or fallback to manually fetch text.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.pop_front(j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = rbuf.get_matched(i - start, j).unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -282,8 +273,7 @@ fn par_induce_sort(
 
                     if c0 >= c1 {
                         if p < bound {
-                            // directly write to B[i] and B[i+1],
-                            // might cause read buffer query misses.
+                            // directly write to B[i] and B[i+1].
                             unsafe { suf.set(p, j as u32) }
                         } else {
                             // push to the write buffer.
@@ -311,10 +301,7 @@ fn par_induce_sort(
 
         // start fetch revB[0].
         fetch_state = fetch.wait();
-        unsafe {
-            suf.slice(suf.len().saturating_sub(block_size)..)
-                .copy_except(&mut fetch_state.0, 0);
-        }
+        fetch_state.0 = suf.len().saturating_sub(block_size)..suf.len();
         fetch.start(fetch_state);
 
         // start the pipeline.
@@ -329,10 +316,7 @@ fn par_induce_sort(
 
             // wait fetch revB[i], start fetch revB[i+1].
             fetch_state = fetch.wait();
-            unsafe {
-                // a potential data race here, not incorrect.
-                suf.slice(bound..end).copy_except(&mut fetch_state.0, 0);
-            }
+            fetch_state.0 = bound..end;
             swap(&mut rbuf, &mut fetch_state.1);
             fetch.start(fetch_state);
 
@@ -340,9 +324,9 @@ fn par_induce_sort(
             for i in (end..start).rev() {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
-                    // query the read buffer, or fallback to fetch text by self.
+                    // query the read buffer, or fallback to manually fetch text.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.pop_back(j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = rbuf.get_matched(i - end, j).unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -353,8 +337,7 @@ fn par_induce_sort(
                     if c0 <= c1 && p <= i {
                         p -= 1;
                         if p >= bound {
-                            // directly write revB[i] and revB[i+1],
-                            // might cause read buffer query misses.
+                            // directly write revB[i] and revB[i+1].
                             unsafe { suf.set(p, j as u32) }
                         } else {
                             // push to the write buffer.
@@ -441,12 +424,10 @@ impl IndexMut<u8> for Buckets {
     }
 }
 
-/// Read buffer deque for induce sorting in parallel.
+/// Read buffer for induce sorting in parallel.
 #[derive(Debug)]
 struct ReadBuffer {
-    buf: Vec<(u32, u8, u8)>,
-    head: usize,
-    tail: usize,
+    buf: Vec<(u8, u8, u32)>,
 }
 
 impl ReadBuffer {
@@ -454,41 +435,22 @@ impl ReadBuffer {
     pub fn with_capacity(cap: usize) -> Self {
         ReadBuffer {
             buf: Vec::with_capacity(cap),
-            head: 0,
-            tail: 0,
         }
     }
 
     #[inline(always)]
     pub fn reset(&mut self) {
         self.buf.truncate(0);
-        self.head = 0;
-        self.tail = 0;
     }
 
     #[inline(always)]
-    pub fn pop_front(&mut self, i: usize) -> Option<(u8, u8)> {
-        if self.head >= self.tail {
+    pub fn get_matched(&mut self, i: usize, j_to_match: usize) -> Option<(u8, u8)> {
+        if i >= self.buf.len() {
             return None;
         }
-        let record = self.buf[self.head];
-        if i as u32 == record.0 {
-            self.head += 1;
-            Some((record.1, record.2))
-        } else {
-            None
-        }
-    }
-
-    #[inline(always)]
-    pub fn pop_back(&mut self, i: usize) -> Option<(u8, u8)> {
-        if self.tail <= self.head {
-            return None;
-        }
-        let record = self.buf[self.tail - 1];
-        if i as u32 == record.0 {
-            self.tail -= 1;
-            Some((record.1, record.2))
+        let (c0, c1, j) = self.buf[i];
+        if j as usize == j_to_match {
+            Some((c0, c1))
         } else {
             None
         }
@@ -496,14 +458,24 @@ impl ReadBuffer {
 
     /// Fetch text in parallel to the read buffer, using cached block of non-zero indices.
     #[inline]
-    pub fn fetch(&mut self, text: &[u8], cache: &Vec<u32>) {
+    pub fn fetch<'a>(&mut self, text: &[u8], suf: &AtomicSlice<'a, u32>, range: Range<usize>) {
         self.reset();
-        self.buf.par_extend(
-            cache
-                .par_iter()
-                .map(|&i| (i - 1, text[i as usize - 1], text[i as usize])),
-        );
-        self.tail = self.buf.len();
+        unsafe {
+            // here is a potential data race against the induce routine and flush worker.
+            // however, it is correct because the atomic integers won't be teared into bad values.
+            // the only bad effect is a relatively small amount of read buffer misses.
+            self.buf.par_extend(suf.slice(range).par_iter().map(|x| {
+                if x > 0 {
+                    let j = (x - 1) as usize;
+                    let c0 = text[j];
+                    let c1 = text[j + 1];
+                    (c0, c1, x - 1)
+                } else {
+                    // treat u32::MAX as empty mark, considering j is always less than u32::MAX.
+                    (0, 0, u32::MAX)
+                }
+            }));
+        }
     }
 }
 
