@@ -140,7 +140,7 @@ pub struct Worker<'scope, S: Send + 'scope> {
 
 impl<'scope, S: Send + 'scope> Worker<'scope, S> {
     /// Make a new task ready.
-    pub fn start(&self, state: S) {
+    pub fn ready(&self, state: S) {
         self.input.send(state).unwrap();
     }
 
@@ -168,8 +168,8 @@ mod tests {
             |x| x ^ 0b00001111,
             |worker_a, worker_b| {
                 for x in data.into_iter() {
-                    worker_a.start(x);
-                    worker_b.start(x);
+                    worker_a.ready(x);
+                    worker_b.ready(x);
                     if worker_a.wait() ^ worker_b.wait() != 0b11111111 {
                         success = false;
                         break;
@@ -193,20 +193,20 @@ mod tests {
                 let mut wbuf0 = Buf(std::usize::MAX, PhantomData);
                 let mut wbuf1 = Buf(std::usize::MAX, PhantomData);
 
-                flush.start(wbuf1);
+                flush.ready(wbuf1);
 
                 rbuf1.0 = 0;
-                fetch.start(rbuf1);
+                fetch.ready(rbuf1);
 
                 wbuf1 = flush.wait();
                 wbuf1.0 = 1;
-                flush.start(wbuf1);
+                flush.ready(wbuf1);
 
                 for i in 0..n {
                     rbuf1 = fetch.wait();
                     swap(&mut rbuf0, &mut rbuf1);
                     rbuf1.0 = i + 1;
-                    fetch.start(rbuf1);
+                    fetch.ready(rbuf1);
 
                     if rbuf0.0 != i {
                         success = false;
@@ -215,7 +215,7 @@ mod tests {
                     wbuf1 = flush.wait();
                     swap(&mut wbuf0, &mut wbuf1);
                     wbuf1.0 = i + 2;
-                    flush.start(wbuf1);
+                    flush.ready(wbuf1);
 
                     if wbuf0.0 != i + 1 {
                         success = false;
@@ -227,7 +227,7 @@ mod tests {
                 }
 
                 rbuf1 = fetch.wait();
-                fetch.start(rbuf1);
+                fetch.ready(rbuf1);
 
                 rbuf1 = fetch.wait();
                 wbuf1 = flush.wait();

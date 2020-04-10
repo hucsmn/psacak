@@ -242,7 +242,7 @@ fn par_induce_sort(
 
         // start fetch B[0].
         fetch_state = (0..block_size.min(suf.len()), ReadBuffer::with_capacity(block_size));
-        fetch.start(fetch_state);
+        fetch.ready(fetch_state);
 
         // start the pipeline.
         for i in 0..ceil_divide(suf.len(), block_size) {
@@ -255,7 +255,7 @@ fn par_induce_sort(
             fetch_state = fetch.wait();
             fetch_state.0 = end..bound;
             swap(&mut rbuf, &mut fetch_state.1);
-            fetch.start(fetch_state);
+            fetch.ready(fetch_state);
 
             // induce_lchars B[i].
             for i in start..end {
@@ -294,7 +294,7 @@ fn par_induce_sort(
                 flush_state = flush.wait();
             }
             swap(&mut wbuf, &mut flush_state);
-            flush.start(flush_state);
+            flush.ready(flush_state);
         }
 
         // stage 2. induce s or (lms) from l (or lml).
@@ -302,7 +302,7 @@ fn par_induce_sort(
         // start fetch revB[0].
         fetch_state = fetch.wait();
         fetch_state.0 = suf.len().saturating_sub(block_size)..suf.len();
-        fetch.start(fetch_state);
+        fetch.ready(fetch_state);
 
         // start the pipeline.
         bkt.set_tail();
@@ -318,7 +318,7 @@ fn par_induce_sort(
             fetch_state = fetch.wait();
             fetch_state.0 = bound..end;
             swap(&mut rbuf, &mut fetch_state.1);
-            fetch.start(fetch_state);
+            fetch.ready(fetch_state);
 
             // induce_schars revB[i].
             for i in (end..start).rev() {
@@ -353,7 +353,7 @@ fn par_induce_sort(
             // wait flush revB[..i+1], start flush revB[..i+2].
             flush_state = flush.wait();
             swap(&mut wbuf, &mut flush_state);
-            flush.start(flush_state);
+            flush.ready(flush_state);
         }
 
         // wait for workers done, then drop channels to shutdown the workers.
