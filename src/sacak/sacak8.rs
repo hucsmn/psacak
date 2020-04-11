@@ -59,7 +59,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
 #[inline]
 fn put_lmscharacters(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
     bkt.set_tail();
-    suf.iter_mut().for_each(|p| *p = 0);
+    reset_slice(suf, 0);
 
     let mut c_prev = text[text.len() - 1];
     let mut p = bkt[c_prev] as usize;
@@ -78,7 +78,7 @@ fn put_lmscharacters(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 #[inline]
 fn put_lmssuffixes(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
     bkt.set_tail();
-    suf[n..].iter_mut().for_each(|p| *p = 0);
+    reset_slice(&mut suf[n..], 0);
 
     for c in (0..=255).rev() {
         let m = bkt.get_lms_count(c);
@@ -91,7 +91,7 @@ fn put_lmssuffixes(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize
 
 /// Copy within slice, and reset source area to given value.
 #[inline(always)]
-fn move_within<T: Copy>(slice: &mut [T], src: Range<usize>, dest: usize, reset: T) {
+fn move_within<T: Uint>(slice: &mut [T], src: Range<usize>, dest: usize, reset: T) {
     let (i, j, k) = (src.start, src.end, dest);
     slice.copy_within(src, dest);
     let leave = if dest > j {
@@ -103,7 +103,7 @@ fn move_within<T: Copy>(slice: &mut [T], src: Range<usize>, dest: usize, reset: 
     } else {
         i..j
     };
-    slice[leave].iter_mut().for_each(|p| *p = reset);
+    reset_slice(&mut slice[leave], reset);
 }
 
 /// Induce sort all the suffixes (or lms-substrings) from the sorted lms-suffixes (or lms-characters).

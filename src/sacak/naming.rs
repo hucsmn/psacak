@@ -67,7 +67,7 @@ where
     let mut m = 1;
     let mut i0 = lmssubs[0].as_index();
     let mut fp0 = FP::get(text, i0);
-    work.iter_mut().for_each(|p| *p = I::MAX);
+    reset_slice(work, I::MAX);
     work[i0 / 2] = I::ZERO;
     for i in 1..n {
         let i1 = lmssubs[i].as_index();
@@ -106,8 +106,7 @@ where
 
     // compare lms-substrings in parallel.
     let (lmssubs, work) = suf.split_at_mut(n);
-    work.par_chunks_mut(ceil_divide(work.len(), jobs))
-        .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = I::LOWER_BITS));
+    reset_slice(work, I::LOWER_BITS);
     let chunk_size = ceil_divide(n - 1, jobs);
     lmssubs[1..]
         .par_chunks(chunk_size)
@@ -214,8 +213,7 @@ where
     });
 
     // compute the interim subproblem in parallel.
-    work.par_chunks_mut(ceil_divide(work.len(), jobs))
-        .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = I::MAX));
+    reset_slice(work, I::MAX);
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     {
         let work = unsafe { AtomicSlice::new(work) };

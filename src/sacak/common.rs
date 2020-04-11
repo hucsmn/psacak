@@ -6,6 +6,9 @@ use rayon::prelude::*;
 
 use super::types::*;
 
+/// Threshold to reset slice of integers in parallel.
+const THRESHOLD_PARALLEL_RESET: usize = 1024 * 1024;
+
 /// A stupid suffix array construction algorithm that handles tiny input.
 pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
 where
@@ -189,6 +192,27 @@ where
         }
     }
     data.len() - p
+}
+
+/// Reset slice of integers.
+#[inline]
+pub fn reset_slice<T: Uint>(slice: &mut [T], reset: T) {
+    if slice.len() * T::SIZE <= THRESHOLD_PARALLEL_RESET {
+        slice
+            .iter_mut()
+            .for_each(|p| *p = reset);
+    } else {
+        // simply use the thread count to divide huge data for now.
+        let jobs = rayon::current_num_threads();
+        let chunk_size = ceil_divide(slice.len(), jobs);
+        slice
+            .par_chunks_mut(chunk_size)
+            .for_each(|chunk|
+                chunk
+                    .iter_mut()
+                    .for_each(|p| *p = reset)
+            );
+    }
 }
 
 /// Convert generic ranges to range bounds.

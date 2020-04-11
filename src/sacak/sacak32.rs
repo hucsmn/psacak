@@ -46,7 +46,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
 #[inline]
 fn put_lmscharacters(text: &[u32], suf: &mut [u32]) {
-    suf.iter_mut().for_each(|p| *p = EMPTY);
+    reset_slice(suf, EMPTY);
 
     foreach_lmschars(text, |i, c| {
         let p = c as usize;
@@ -89,7 +89,7 @@ fn put_lmscharacters(text: &[u32], suf: &mut [u32]) {
 /// Put the sorted lms-suffixes, originally located in head of workspace, to their corresponding bucket tails.
 #[inline]
 fn put_lmssuffixes(text: &[u32], suf: &mut [u32], n: usize) {
-    suf[n..].iter_mut().for_each(|p| *p = EMPTY);
+    reset_slice(&mut suf[n..], EMPTY);
 
     // copy sorted lms-suffixes bucket by bucket.
     let mut prev = text.len();
