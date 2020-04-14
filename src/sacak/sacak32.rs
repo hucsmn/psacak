@@ -6,6 +6,12 @@ use super::types::*;
 /// Empty symbol in workspace.
 const EMPTY: u32 = 1 << 31;
 
+/// Block size for induce sorting in parallel.
+const BLOCK_SIZE: usize = 128 * 1024;
+
+/// Threshold to enable induce sorting in parallel.
+const THRESHOLD_PARALLEL_INDUCE: usize = 3 * BLOCK_SIZE;
+
 /// The inner level SACA-K algorithm for unsigned integer strings.
 ///
 /// Assumes that characters are correctly translated to corresponding bucket pointers.
@@ -20,7 +26,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
 
     // induce sort lms-substrings.
     put_lmscharacters(text, suf);
-    induce_sort(text, suf, true);
+    induce_sort(text, suf, pipeline, BLOCK_SIZE, true);
 
     // construct the subproblem, compute its suffix array, and get sorted lms-suffixes.
     let n = compact_left_range(suf, 1..EMPTY);
@@ -40,7 +46,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
 
     // induce sort the suffix array from sorted lms-suffixes.
     put_lmssuffixes(text, suf, n);
-    induce_sort(text, suf, false);
+    induce_sort(text, suf, pipeline, BLOCK_SIZE, false);
 }
 
 /// Put lms-characters to their corresponding bucket tails, in arbitary order.
@@ -110,7 +116,13 @@ fn put_lmssuffixes(text: &[u32], suf: &mut [u32], n: usize) {
 
 /// Induce sort all the suffixes (or lms-substrings) from the sorted lms-suffixes (or lms-characters).
 #[inline]
-fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
+fn induce_sort(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline, block_size: usize, left_most: bool) {
+    nonpar_induce_sort(text, suf, left_most);
+}
+
+/// Induce sort in serial.
+#[inline]
+fn nonpar_induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
     // stage 1. induce l (or lml) from lms.
 
     // induce from the sentinel.
@@ -165,14 +177,15 @@ fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
                     }
                 }
 
-                // lms must be cleared, and only keep lml if left_most toggled.
-                let mut ltype = true;
-                if j + 2 < text.len() {
-                    let c2 = text[j + 2];
-                    ltype = c1 > c2 || (c1 == c2 && i > c1 as usize);
-                }
-                if left_most || !ltype {
+                if left_most {
+                    // clear non-lml.
                     suf[i] = EMPTY;
+                } else if j + 2 < text.len() {
+                    // clear lms.
+                    let c2 = text[j + 2];
+                    if !(c1 > c2 || (c1 == c2 && i > c1 as usize)) {
+                        suf[i] = EMPTY;
+                    }
                 }
             }
         }
@@ -234,7 +247,7 @@ fn induce_sort(text: &[u32], suf: &mut [u32], left_most: bool) {
                 }
 
                 if left_most {
-                    // only keep lms.
+                    // clear non-lms.
                     suf[i] = EMPTY;
                 }
             }

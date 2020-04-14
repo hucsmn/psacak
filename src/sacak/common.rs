@@ -198,20 +198,14 @@ where
 #[inline]
 pub fn reset_slice<T: Uint>(slice: &mut [T], reset: T) {
     if slice.len() * T::SIZE <= THRESHOLD_PARALLEL_RESET {
-        slice
-            .iter_mut()
-            .for_each(|p| *p = reset);
+        slice.iter_mut().for_each(|p| *p = reset);
     } else {
         // simply use the thread count to divide huge data for now.
         let jobs = rayon::current_num_threads();
         let chunk_size = ceil_divide(slice.len(), jobs);
         slice
             .par_chunks_mut(chunk_size)
-            .for_each(|chunk|
-                chunk
-                    .iter_mut()
-                    .for_each(|p| *p = reset)
-            );
+            .for_each(|chunk| chunk.iter_mut().for_each(|p| *p = reset));
     }
 }
 
