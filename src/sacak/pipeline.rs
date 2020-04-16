@@ -159,80 +159,126 @@ mod tests {
 
     struct Buf(pub usize, PhantomData<Vec<u32>>);
 
+    impl Buf {
+        pub fn new() -> Self {
+            Buf(std::usize::MAX, PhantomData)
+        }
+    }
     #[quickcheck]
-    fn quickcheck_pipeline_outer(data: Vec<u8>) -> bool {
-        let mut success = true;
+    fn quickcheck_pipeline_outer(n: usize) {
+        if n == 0 {
+            return;
+        }
         let mut pipeline = Pipeline::new();
+
+        // simulate the time sequence of outer level induce pipeline.
         pipeline.outer_induce(
-            |x| x ^ 0b11110000,
-            |x| x ^ 0b00001111,
-            |worker_a, worker_b| {
-                for x in data.into_iter() {
-                    worker_a.ready(x);
-                    worker_b.ready(x);
-                    if worker_a.wait() ^ worker_b.wait() != 0b11111111 {
-                        success = false;
-                        break;
+            |buf| buf,
+            |buf| buf,
+            |fetch, flush| {
+                let mut rbuf = Buf::new();
+                let mut rbuf_fetch = Buf::new();
+                let mut wbuf = Buf::new();
+                let mut wbuf_flush;
+
+                rbuf_fetch.0 = 0;
+                fetch.ready(rbuf_fetch);
+
+                for i in 0..n {
+                    rbuf_fetch = fetch.wait();
+                    swap(&mut rbuf, &mut rbuf_fetch);
+                    rbuf_fetch.0 = i + 1;
+                    fetch.ready(rbuf_fetch);
+
+                    assert_eq!(rbuf.0, i);
+
+                    if i == 0 {
+                        wbuf_flush = Buf::new();
+                    } else {
+                        wbuf_flush = flush.wait();
+                        assert_eq!(wbuf_flush.0, i + 1);
                     }
+                    swap(&mut wbuf, &mut wbuf_flush);
+                    wbuf_flush.0 = i + 2;
+                    flush.ready(wbuf_flush);
                 }
+
+                fetch.wait();
+                flush.wait();
             },
         );
-        success
     }
 
     #[quickcheck]
-    fn quickcheck_pipeline_inner(n: usize) -> bool {
-        let mut success = true;
+    fn quickcheck_pipeline_inner(n: usize) {
+        if n == 0 {
+            return;
+        }
         let mut pipeline = Pipeline::new();
+
+        // simulate the time sequence of inner level induce pipeline.
+        let mut rbuf = Buf::new();
+        let mut rbuf_fetch = Buf::new();
+        let mut wbuf = Buf::new();
+        let mut wbuf_flush = Buf::new();
         pipeline.inner_induce(
             |buf| buf,
             |buf| buf,
             |fetch, flush| {
-                let mut rbuf0 = Buf(std::usize::MAX, PhantomData);
-                let mut rbuf1 = Buf(std::usize::MAX, PhantomData);
-                let mut wbuf0 = Buf(std::usize::MAX, PhantomData);
-                let mut wbuf1 = Buf(std::usize::MAX, PhantomData);
-
-                flush.ready(wbuf1);
-
-                rbuf1.0 = 0;
-                fetch.ready(rbuf1);
-
-                wbuf1 = flush.wait();
-                wbuf1.0 = 1;
-                flush.ready(wbuf1);
+                flush.ready(wbuf_flush);
+                rbuf_fetch.0 = 0;
+                fetch.ready(rbuf_fetch);
+                wbuf_flush = flush.wait();
+                wbuf_flush.0 = 1;
+                flush.ready(wbuf_flush);
 
                 for i in 0..n {
-                    rbuf1 = fetch.wait();
-                    swap(&mut rbuf0, &mut rbuf1);
-                    rbuf1.0 = i + 1;
-                    fetch.ready(rbuf1);
+                    rbuf_fetch = fetch.wait();
+                    swap(&mut rbuf, &mut rbuf_fetch);
+                    rbuf_fetch.0 = i + 1;
+                    fetch.ready(rbuf_fetch);
 
-                    if rbuf0.0 != i {
-                        success = false;
-                    }
+                    assert_eq!(rbuf.0, i);
 
-                    wbuf1 = flush.wait();
-                    swap(&mut wbuf0, &mut wbuf1);
-                    wbuf1.0 = i + 2;
-                    flush.ready(wbuf1);
+                    wbuf_flush = flush.wait();
+                    swap(&mut wbuf, &mut wbuf_flush);
+                    wbuf_flush.0 = i + 2;
+                    flush.ready(wbuf_flush);
 
-                    if wbuf0.0 != i + 1 {
-                        success = false;
-                    }
-
-                    if !success {
-                        break;
-                    }
+                    assert_eq!(wbuf.0, i + 1);
                 }
 
-                rbuf1 = fetch.wait();
-                fetch.ready(rbuf1);
-
-                rbuf1 = fetch.wait();
-                wbuf1 = flush.wait();
+                fetch.ready(fetch.wait());
+                rbuf_fetch = fetch.wait();
+                wbuf_flush = flush.wait();
             },
         );
-        success
+    }
+
+    #[quickcheck]
+    fn quickcheck_pipeline_reuse(n: usize) {
+        let mut pipeline = Pipeline::new();
+        pipeline.inner_induce(
+            |x| x,
+            |x| x,
+            |worker_a, worker_b| {
+                worker_a.ready(0);
+                worker_b.ready(0);
+                assert_eq!(worker_a.wait(), 0);
+                assert_eq!(worker_b.wait(), 0);
+            },
+        );
+        for i in 1..=n {
+            pipeline.outer_induce(
+                |x| x,
+                |x| x,
+                |worker_a, worker_b| {
+                    worker_a.ready(i);
+                    worker_b.ready(i);
+                    assert_eq!(worker_a.wait(), i);
+                    assert_eq!(worker_b.wait(), i);
+                },
+            );
+        }
     }
 }

@@ -552,11 +552,18 @@ mod tests {
     }
 
     #[quickcheck]
-    fn quickcheck_par_induce8(text: Vec<u8>, block_size: usize) -> bool {
+    fn quickcheck_par_induce8(text: Vec<u8>, block_size: usize) {
         if text.len() == 0 || block_size == 0 {
-            return true;
+            return;
         }
-        calc_nonpar_lms_induce(&text[..]) == calc_par_lms_induce(&text[..], block_size)
+        assert_eq!(
+            calc_nonpar_lms_induce(&text[..], false),
+            calc_par_lms_induce(&text[..], block_size, false)
+        );
+        assert_eq!(
+            calc_nonpar_lms_induce(&text[..], true),
+            calc_par_lms_induce(&text[..], block_size, true)
+        );
     }
 
     // helper functions.
@@ -573,20 +580,30 @@ mod tests {
         suf
     }
 
-    fn calc_nonpar_lms_induce(text: &[u8]) -> Vec<u32> {
+    fn calc_nonpar_lms_induce(text: &[u8], left_most: bool) -> Vec<u32> {
         let mut suf = vec![0; text.len()];
         let mut bkt = Buckets::new(text);
         put_lmscharacters(text, &mut suf[..], &mut bkt);
-        nonpar_induce_sort(text, &mut suf[..], &mut bkt, false);
+        nonpar_induce_sort(text, &mut suf[..], &mut bkt, left_most);
+        if left_most {
+            // only the order of lms should be correct.
+            let n = compact_left(&mut suf[..], 0);
+            reset_slice(&mut suf[n..], 0);
+        }
         suf
     }
 
-    fn calc_par_lms_induce(text: &[u8], block_size: usize) -> Vec<u32> {
+    fn calc_par_lms_induce(text: &[u8], block_size: usize, left_most: bool) -> Vec<u32> {
         let mut suf = vec![0; text.len()];
         let mut bkt = Buckets::new(text);
         let mut pipeline = Pipeline::new();
         put_lmscharacters(text, &mut suf[..], &mut bkt);
-        par_induce_sort(text, &mut suf[..], &mut bkt, &mut pipeline, block_size, false);
+        par_induce_sort(text, &mut suf[..], &mut bkt, &mut pipeline, block_size, left_most);
+        if left_most {
+            // only the order of lms should be correct.
+            let n = compact_left(&mut suf[..], 0);
+            reset_slice(&mut suf[n..], 0);
+        }
         suf
     }
 }
