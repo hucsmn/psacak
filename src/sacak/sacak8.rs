@@ -130,9 +130,8 @@ fn induce_sort(
 fn nonpar_induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most: bool) {
     // stage 1. induce l (or lml) from lms.
 
-    bkt.set_head();
-
     // induce from the sentinel.
+    bkt.set_head();
     let mut prev_c0 = text[text.len() - 1];
     let mut p = bkt[prev_c0] as usize;
     suf[p] = (text.len() - 1) as u32;
@@ -165,9 +164,9 @@ fn nonpar_induce_sort(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, left_most
     // stage 2. induce s or (lms) from l (or lml).
 
     bkt.set_tail();
-
     let mut prev_c0 = 255;
     let mut p = bkt[prev_c0] as usize;
+
     for i in (0..suf.len()).rev() {
         if suf[i] > 0 {
             // c1 is non-empty, and has a preceding character c0.
@@ -212,58 +211,50 @@ fn par_induce_sort(
 ) {
     let suf = AtomicSlice::new(suf);
 
-    // employ two paralleled worker to prefetch text and flush back workspace.
-    let fetch_worker = |(range, mut rbuf): (Range<usize>, ReadBuffer)| {
-        rbuf.fetch(text, &suf, range.start..range.end);
-        (range, rbuf)
-    };
-    let flush_worker = |mut wbuf: WriteBuffer| {
-        wbuf.flush(&suf);
-        wbuf
-    };
+    // stage 1. induce l (or lml) from lms.
 
-    // the induce pipeline for outer level SACA-K.
-    pipeline.outer_induce(fetch_worker, flush_worker, |fetch, flush| {
-        let mut rbuf = ReadBuffer::with_capacity(block_size); // read buffer owned by induce routine.
-        let mut wbuf = WriteBuffer::with_capacity(block_size); // write buffer owned by induce routine.
-        let mut fetch_state; // range of workspace, together with an owned read buffer.
-        let mut flush_state; // write buffer owned by flush worker.
+    // induce from the sentinel.
+    bkt.set_head();
+    let mut prev_c0 = text[text.len() - 1];
+    let mut p = bkt[prev_c0] as usize;
+    unsafe {
+        suf.set(p, (text.len() - 1) as u32);
+    }
+    p += 1;
 
-        // stage 1. induce l (or lml) from lms.
-
-        // induce from the sentinel.
-        bkt.set_head();
-        let mut prev_c0 = text[text.len() - 1];
-        let mut p = bkt[prev_c0] as usize;
-        unsafe {
-            suf.set(p, (text.len() - 1) as u32);
-        }
-        p += 1;
-
-        // start fetch B[0].
-        fetch_state = (0..block_size.min(suf.len()), ReadBuffer::with_capacity(block_size));
-        fetch.ready(fetch_state);
-
-        // start the pipeline.
-        for i in 0..ceil_divide(suf.len(), block_size) {
-            // block boundaries for B[i] and B[i+1].
-            let start = i * block_size;
-            let end = start.saturating_add(block_size).min(suf.len());
-            let bound = end.saturating_add(block_size).min(suf.len());
-
-            // wait fetch B[i], start fetch B[i+1].
-            fetch_state = fetch.wait();
-            fetch_state.0 = end..bound;
-            swap(&mut rbuf, &mut fetch_state.1);
-            fetch.ready(fetch_state);
-
-            // induce_lchars B[i].
+    let mut buffers = (
+        RBuf::with_capacity(block_size),
+        RBuf::with_capacity(block_size),
+        WBuf::with_capacity(block_size),
+        WBuf::with_capacity(block_size),
+    );
+    buffers = pipeline.induce_outer(
+        false,
+        suf.len(),
+        block_size,
+        buffers,
+        |(range, mut rbuf): (Range<usize>, RBuf)| {
+            // the fetch worker.
+            rbuf.fetch(text, &suf, range.start..range.end);
+            rbuf
+        },
+        |mut wbuf: WBuf| {
+            // the flush worker.
+            wbuf.flush(&suf);
+            wbuf
+        },
+        |ctx| {
+            // the induce routine.
+            let Range { start, end } = ctx.cur_block();
             for i in start..end {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
                     // query the read buffer, or fallback to manually fetch text.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.get_matched(i - start, j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = ctx
+                        .rbuf
+                        .get_matched(i - start, j)
+                        .unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -272,12 +263,12 @@ fn par_induce_sort(
                     }
 
                     if c0 >= c1 {
-                        if p < bound {
+                        if ctx.contains(p) {
                             // directly write to B[i] and B[i+1].
                             unsafe { suf.set(p, j as u32) }
                         } else {
                             // push to the write buffer.
-                            wbuf.defer(p as u32, j as u32);
+                            ctx.wbuf.defer(p as u32, j as u32);
                         }
                         p += 1;
                         if left_most {
@@ -286,47 +277,42 @@ fn par_induce_sort(
                     }
                 }
             }
+        },
+    );
 
-            // wait flush B[i+1..], start flush B[i+2..].
-            if i == 0 {
-                flush_state = WriteBuffer::with_capacity(block_size);
-            } else {
-                flush_state = flush.wait();
-            }
-            swap(&mut wbuf, &mut flush_state);
-            flush.ready(flush_state);
-        }
+    // stage 2. induce s or (lms) from l (or lml).
 
-        // stage 2. induce s or (lms) from l (or lml).
+    bkt.set_tail();
+    let mut prev_c0 = 255;
+    let mut p = bkt[prev_c0] as usize;
 
-        // start fetch revB[0].
-        fetch_state = fetch.wait();
-        fetch_state.0 = suf.len().saturating_sub(block_size)..suf.len();
-        fetch.ready(fetch_state);
-
-        // start the pipeline.
-        bkt.set_tail();
-        let mut prev_c0 = 255;
-        let mut p = bkt[prev_c0] as usize;
-        for i in 0..ceil_divide(suf.len(), block_size) {
-            // block boundaries for revB[i] and revB[i+1].
-            let start = suf.len() - (i * block_size);
-            let end = start.saturating_sub(block_size);
-            let bound = end.saturating_sub(block_size);
-
-            // wait fetch revB[i], start fetch revB[i+1].
-            fetch_state = fetch.wait();
-            fetch_state.0 = bound..end;
-            swap(&mut rbuf, &mut fetch_state.1);
-            fetch.ready(fetch_state);
-
-            // induce_schars revB[i].
-            for i in (end..start).rev() {
+    buffers = pipeline.induce_outer(
+        true,
+        suf.len(),
+        block_size,
+        buffers,
+        |(range, mut rbuf): (Range<usize>, RBuf)| {
+            // the fetch worker.
+            rbuf.fetch(text, &suf, range.start..range.end);
+            rbuf
+        },
+        |mut wbuf: WBuf| {
+            // the flush worker.
+            wbuf.flush(&suf);
+            wbuf
+        },
+        |ctx| {
+            // the induce routine.
+            let Range { start, end } = ctx.cur_block();
+            for i in (start..end).rev() {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
                     // query the read buffer, or fallback to manually fetch text.
                     let j = (x - 1) as usize;
-                    let (c0, c1) = rbuf.get_matched(i - end, j).unwrap_or_else(|| (text[j], text[j + 1]));
+                    let (c0, c1) = ctx
+                        .rbuf
+                        .get_matched(i - start, j)
+                        .unwrap_or_else(|| (text[j], text[j + 1]));
 
                     if c0 != prev_c0 {
                         bkt[prev_c0] = p as u32;
@@ -336,12 +322,12 @@ fn par_induce_sort(
 
                     if c0 <= c1 && p <= i {
                         p -= 1;
-                        if p >= bound {
+                        if ctx.contains(p) {
                             // directly write revB[i] and revB[i+1].
                             unsafe { suf.set(p, j as u32) }
                         } else {
                             // push to the write buffer.
-                            wbuf.defer(p as u32, j as u32);
+                            ctx.wbuf.defer(p as u32, j as u32);
                         }
                         if left_most {
                             unsafe { suf.set(i, 0) }
@@ -349,17 +335,8 @@ fn par_induce_sort(
                     }
                 }
             }
-
-            // wait flush revB[..i+1], start flush revB[..i+2].
-            flush_state = flush.wait();
-            swap(&mut wbuf, &mut flush_state);
-            flush.ready(flush_state);
-        }
-
-        // wait for workers done, then drop channels to shutdown the workers.
-        fetch.wait();
-        flush.wait();
-    });
+        },
+    );
 }
 
 /// Bucket pointers and lms-character counters for byte string.
@@ -426,21 +403,16 @@ impl IndexMut<u8> for Buckets {
 
 /// Read buffer for induce sorting in parallel.
 #[derive(Debug)]
-struct ReadBuffer {
+struct RBuf {
     buf: Vec<(u8, u8, u32)>,
 }
 
-impl ReadBuffer {
+impl RBuf {
     #[inline(always)]
     pub fn with_capacity(cap: usize) -> Self {
-        ReadBuffer {
+        RBuf {
             buf: Vec::with_capacity(cap),
         }
-    }
-
-    #[inline(always)]
-    pub fn reset(&mut self) {
-        self.buf.truncate(0);
     }
 
     #[inline(always)]
@@ -459,7 +431,6 @@ impl ReadBuffer {
     /// Fetch text in parallel to the read buffer, using cached block of non-zero indices.
     #[inline]
     pub fn fetch<'a>(&mut self, text: &[u8], suf: &AtomicSlice<'a, u32>, range: Range<usize>) {
-        self.reset();
         unsafe {
             // here is a potential data race against the induce routine and flush worker.
             // however, it is correct because the atomic integers won't be teared into bad values.
@@ -479,22 +450,24 @@ impl ReadBuffer {
     }
 }
 
+impl ReadBuffer for RBuf {
+    #[inline(always)]
+    fn reset(&mut self, _: usize) {
+        self.buf.truncate(0);
+    }
+}
+
 /// Write buffer for induce sorting in parallel.
 #[derive(Debug)]
-struct WriteBuffer {
+struct WBuf {
     buf: Vec<(u32, u32)>,
 }
 
-impl WriteBuffer {
+impl WBuf {
     pub fn with_capacity(cap: usize) -> Self {
-        WriteBuffer {
+        WBuf {
             buf: Vec::with_capacity(cap),
         }
-    }
-
-    #[inline(always)]
-    pub fn reset(&mut self) {
-        self.buf.truncate(0);
     }
 
     #[inline(always)]
@@ -510,7 +483,13 @@ impl WriteBuffer {
         self.buf.par_iter().for_each(|&(i, x)| unsafe {
             suf.set(i as usize, x);
         });
-        self.reset();
+    }
+}
+
+impl WriteBuffer for WBuf {
+    #[inline(always)]
+    fn reset(&mut self) {
+        self.buf.truncate(0);
     }
 }
 

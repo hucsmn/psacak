@@ -1,284 +1,583 @@
-use std::marker::PhantomData;
+use std::mem::swap;
+use std::ops::Range;
 
-use crossbeam::channel::{self, Receiver, Sender};
+use crossbeam::channel;
 use scoped_threadpool::{Pool, Scope};
 
-/// Pipeline infrastructure for induce sorting in parallel, which helps to improve data throughput.
+use super::common::ceil_divide;
+
+/// The read buffer from text.
+pub trait ReadBuffer: Send {
+    fn reset(&mut self, block_size: usize);
+}
+
+/// The write buffer into workspace.
+pub trait WriteBuffer: Send {
+    fn reset(&mut self);
+}
+
+/// The induce pipeline infrastructure.
 pub struct Pipeline {
     pool: Option<Pool>,
 }
 
 impl Pipeline {
+    /// Create an induce pipeline.
+    #[inline(always)]
     pub fn new() -> Self {
         Pipeline { pool: None }
     }
 
-    /// Start the induce pipeline for outer level SACA-K.
-    pub fn outer_induce<'scope, S, T, FETCH, FLUSH, INDUCE>(&mut self, fetch: FETCH, flush: FLUSH, induce: INDUCE)
-    where
-        S: Send + 'scope,
-        T: Send + 'scope,
-        FETCH: Fn(S) -> S + 'scope + Send,
-        FLUSH: Fn(T) -> T + 'scope + Send,
-        INDUCE: FnOnce(Worker<'scope, S>, Worker<'scope, T>) + 'scope + Send,
-    {
-        if self.pool.is_none() {
-            self.pool = Some(Pool::new(2));
-        }
-        if let Some(ref mut pool) = self.pool {
-            pool.scoped(|scope| {
-                let fetch_worker = Self::new_free_worker(scope, fetch);
-                let flush_worker = Self::new_free_worker(scope, flush);
-                induce(fetch_worker, flush_worker);
-            });
-        } else {
-            unreachable!();
-        }
-    }
-
-    /// Start the induce pipeline for inner level SACA-K.
-    pub fn inner_induce<'scope, S, T, FETCH, FLUSH, INDUCE>(&mut self, fetch: FETCH, flush: FLUSH, induce: INDUCE)
-    where
-        S: Send + 'scope,
-        T: Send + 'scope,
-        FETCH: Fn(S) -> S + 'scope + Send,
-        FLUSH: Fn(T) -> T + 'scope + Send,
-        INDUCE: FnOnce(Worker<'scope, S>, Worker<'scope, T>) + 'scope + Send,
-    {
-        if self.pool.is_none() {
-            self.pool = Some(Pool::new(2));
-        }
-        if let Some(ref mut pool) = self.pool {
-            pool.scoped(|scope| {
-                let (fetch_worker, flush_worker) = Self::new_worker_pair(scope, fetch, flush);
-                induce(fetch_worker, flush_worker);
-            });
-        } else {
-            unreachable!();
-        }
-    }
-
-    /// Create new worker that iterates and alters the state using given action.
-    fn new_free_worker<'pool, 'scope, S, F>(scope: &Scope<'pool, 'scope>, action: F) -> Worker<'scope, S>
-    where
-        S: Send + 'scope,
-        F: Fn(S) -> S + 'scope + Send,
-    {
-        let (insend, inrecv) = channel::bounded(0);
-        let (outsend, outrecv) = channel::bounded(0);
-
-        scope.execute(move || {
-            while let Ok(mut state) = inrecv.recv() {
-                state = action(state);
-                outsend.send(state).unwrap();
-            }
-        });
-
-        Worker {
-            input: insend,
-            output: outrecv,
-            _marker: PhantomData,
-        }
-    }
-
-    /// Create new pair of workers that one happens before another.
-    fn new_worker_pair<'pool, 'scope, S, T, FETCH, FLUSH>(
-        scope: &Scope<'pool, 'scope>,
+    /// Start induce pipeline for the outer-level pSACAK.
+    #[inline]
+    pub fn induce_outer<'scope, RBUF, WBUF, FETCH, FLUSH, INDUCE>(
+        &mut self,
+        backward: bool,
+        length: usize,
+        block_size: usize,
+        buffers: (RBUF, RBUF, WBUF, WBUF),
         fetch: FETCH,
         flush: FLUSH,
-    ) -> (Worker<'scope, S>, Worker<'scope, T>)
+        mut induce: INDUCE,
+    ) -> (RBUF, RBUF, WBUF, WBUF)
+    where
+        RBUF: ReadBuffer + 'scope,
+        WBUF: WriteBuffer + 'scope,
+        FETCH: Fn((Range<usize>, RBUF)) -> RBUF + Send + 'scope,
+        FLUSH: Fn(WBUF) -> WBUF + Send + 'scope,
+        INDUCE: FnMut(&mut InduceContext<RBUF, WBUF>) + 'scope,
+    {
+        let (rbuf0, rbuf1, wbuf0, wbuf1) = buffers;
+        self.pool().scoped(|scope| {
+            // setup the pipeiline.
+            let fetch_worker = Self::spawn_independent(scope, fetch);
+            let flush_worker = Self::spawn_independent(scope, flush);
+            let mut ctx = InduceContext::new(backward, length, block_size, rbuf0, wbuf0, fetch_worker, flush_worker);
+
+            // invoke the induce pipeline.
+            ctx.pre_induce(rbuf1, wbuf1);
+            for _ in 0..ctx.blocks() {
+                ctx.sync_fetch();
+                induce(&mut ctx);
+                ctx.sync_flush();
+            }
+
+            // reuse buffers.
+            let (rbuf1, wbuf1) = ctx.post_induce();
+            let (rbuf0, wbuf0) = ctx.into_buffers();
+            (rbuf0, rbuf1, wbuf0, wbuf1)
+        })
+    }
+
+    /// Start induce pipeline for the inner-level pSACAK.
+    #[inline]
+    pub fn induce_inner<'scope, RBUF, WBUF, FETCH, FLUSH, INDUCE>(
+        &mut self,
+        backward: bool,
+        length: usize,
+        block_size: usize,
+        buffers: (RBUF, RBUF, WBUF, WBUF),
+        fetch: FETCH,
+        flush: FLUSH,
+        mut induce: INDUCE,
+    ) -> (RBUF, RBUF, WBUF, WBUF)
+    where
+        RBUF: ReadBuffer + 'scope,
+        WBUF: WriteBuffer + 'scope,
+        FETCH: Fn((Range<usize>, RBUF)) -> RBUF + Send + 'scope,
+        FLUSH: Fn(WBUF) -> WBUF + Send + 'scope,
+        INDUCE: FnMut(&mut InduceContext<RBUF, WBUF>) + 'scope,
+    {
+        let (rbuf0, rbuf1, wbuf0, wbuf1) = buffers;
+        self.pool().scoped(|scope| {
+            // setup the pipeiline.
+            // in the inner-level pSACAK, flush must happen before fetch to avoid data race.
+            let (flush_worker, fetch_worker) = Self::spawn_sequential(scope, flush, fetch);
+            let mut ctx = InduceContext::new(backward, length, block_size, rbuf0, wbuf0, fetch_worker, flush_worker);
+
+            // invoke the induce pipeline.
+            ctx.pre_induce(rbuf1, wbuf1);
+            for _ in 0..ctx.blocks() {
+                ctx.sync_fetch();
+                induce(&mut ctx);
+                ctx.sync_flush();
+            }
+
+            // reuse buffers.
+            let (rbuf1, wbuf1) = ctx.post_induce();
+            let (rbuf0, wbuf0) = ctx.into_buffers();
+            (rbuf0, rbuf1, wbuf0, wbuf1)
+        })
+    }
+
+    #[inline(always)]
+    fn pool(&mut self) -> &mut Pool {
+        self.pool.get_or_insert_with(|| Pool::new(2))
+    }
+
+    #[inline(always)]
+    fn spawn_independent<'scope, S, T, ACTION>(scope: &Scope<'_, 'scope>, action: ACTION) -> Worker<S, T>
     where
         S: Send + 'scope,
         T: Send + 'scope,
-        FETCH: Fn(S) -> S + 'scope + Send,
-        FLUSH: Fn(T) -> T + 'scope + Send,
+        ACTION: Fn(S) -> T + Send + 'scope,
     {
-        let (flush_insend, flush_inrecv) = channel::bounded(0);
-        let (flush_outsend, flush_outrecv) = channel::bounded(1);
-
-        let (fetch_insend, fetch_inrecv) = channel::bounded(1);
-        let (fetch_outsend, fetch_outrecv) = channel::bounded(0);
-
-        let (blocksend, blockrecv) = channel::bounded(0);
+        let (ins, inr) = channel::bounded(0);
+        let (outs, outr) = channel::bounded(0);
 
         scope.execute(move || {
-            while let Ok(mut state) = flush_inrecv.recv() {
-                state = flush(state);
-                flush_outsend.send(state).unwrap();
-                blocksend.send(()).unwrap();
+            while let Ok(input) = inr.recv() {
+                outs.send(action(input)).unwrap();
             }
         });
 
+        Worker::new(ins, outr)
+    }
+
+    #[inline(always)]
+    fn spawn_sequential<'scope, S0, T0, S1, T1, BEFORE, AFTER>(
+        scope: &Scope<'_, 'scope>,
+        before: BEFORE,
+        after: AFTER,
+    ) -> (Worker<S0, T0>, Worker<S1, T1>)
+    where
+        S0: Send + 'scope,
+        T0: Send + 'scope,
+        S1: Send + 'scope,
+        T1: Send + 'scope,
+        BEFORE: Fn(S0) -> T0 + Send + 'scope,
+        AFTER: Fn(S1) -> T1 + Send + 'scope,
+    {
+        let (ins0, inr0) = channel::bounded(1);
+        let (outs0, outr0) = channel::bounded(1);
+        let (ins1, inr1) = channel::bounded(1);
+        let (outs1, outr1) = channel::bounded(0);
+
         scope.execute(move || {
-            while let Ok(mut state) = fetch_inrecv.recv() {
-                blockrecv.recv().unwrap();
-                state = fetch(state);
-                fetch_outsend.send(state).unwrap();
+            while let Ok(input0) = inr0.recv() {
+                outs0.send(before(input0)).unwrap();
+                let input1 = inr1.recv().unwrap();
+                outs1.send(after(input1)).unwrap();
             }
         });
 
-        let fetch_worker = Worker {
-            input: fetch_insend,
-            output: fetch_outrecv,
-            _marker: PhantomData,
-        };
-        let flush_worker = Worker {
-            input: flush_insend,
-            output: flush_outrecv,
-            _marker: PhantomData,
-        };
-        (fetch_worker, flush_worker)
+        (Worker::new(ins0, outr0), Worker::new(ins1, outr1))
     }
 }
 
-/// Worker thread controller.
-pub struct Worker<'scope, S: Send + 'scope> {
-    input: Sender<S>,
-    output: Receiver<S>,
-    _marker: PhantomData<&'scope S>,
+/// Handle for a worker routine.
+struct Worker<S: Send, T: Send> {
+    input: channel::Sender<S>,
+    output: channel::Receiver<T>,
 }
 
-impl<'scope, S: Send + 'scope> Worker<'scope, S> {
-    /// Make a new task ready.
-    pub fn ready(&self, state: S) {
-        self.input.send(state).unwrap();
+impl<S: Send, T: Send> Worker<S, T> {
+    #[inline(always)]
+    pub fn new(input: channel::Sender<S>, output: channel::Receiver<T>) -> Self {
+        Worker { input, output }
     }
 
-    /// Wait for the previous task.
-    pub fn wait(&self) -> S {
+    /// Ready to start the next action.
+    #[inline(always)]
+    pub fn ready(&self, input: S) {
+        self.input.send(input).unwrap();
+    }
+
+    /// Wait for the previous action.
+    #[inline(always)]
+    pub fn wait(&self) -> T {
         self.output.recv().unwrap()
+    }
+}
+
+/// The induce context.
+///
+/// It assumes that fetch action should do nothing if the input range of text is empty,
+/// and that flush action should do nothing if the input write buffer is reset.
+pub struct InduceContext<RBUF: ReadBuffer, WBUF: WriteBuffer> {
+    length: usize,
+    block_size: usize,
+
+    cur_start: usize,
+    next_start: usize,
+    cur_end: usize,
+    next_end: usize,
+
+    pub rbuf: RBUF,
+    pub wbuf: WBUF,
+
+    fetch: Worker<(Range<usize>, RBUF), RBUF>,
+    flush: Worker<WBUF, WBUF>,
+
+    backward: bool,
+}
+
+impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
+    /// Create induce state.
+    #[inline(always)]
+    fn new(
+        backward: bool,
+        length: usize,
+        block_size: usize,
+        mut rbuf: RBUF,
+        mut wbuf: WBUF,
+        fetch: Worker<(Range<usize>, RBUF), RBUF>,
+        flush: Worker<WBUF, WBUF>,
+    ) -> Self {
+        rbuf.reset(0);
+        wbuf.reset();
+        if !backward {
+            InduceContext {
+                length,
+                block_size,
+                cur_start: 0,
+                next_start: 0,
+                cur_end: 0,
+                next_end: Ord::min(block_size, length),
+                rbuf,
+                wbuf,
+                fetch,
+                flush,
+                backward: false,
+            }
+        } else {
+            InduceContext {
+                length,
+                block_size,
+                cur_start: length,
+                next_start: length.saturating_sub(block_size),
+                cur_end: length,
+                next_end: length,
+                rbuf,
+                wbuf,
+                fetch,
+                flush,
+                backward: true,
+            }
+        }
+    }
+
+    /// Take out buffers.
+    #[inline(always)]
+    fn into_buffers(self) -> (RBUF, WBUF) {
+        (self.rbuf, self.wbuf)
+    }
+
+    /// Number of blocks.
+    #[inline(always)]
+    pub fn blocks(&self) -> usize {
+        ceil_divide(self.length, self.block_size)
+    }
+
+    /// Test if position is in the current or the next block.
+    #[inline(always)]
+    pub fn contains(&self, i: usize) -> bool {
+        if !self.backward {
+            i >= self.cur_start && i < self.next_end
+        } else {
+            i >= self.next_start && i < self.cur_end
+        }
+    }
+
+    /// Range of the current block.
+    #[inline(always)]
+    pub fn cur_block(&self) -> Range<usize> {
+        self.cur_start..self.cur_end
+    }
+
+    /// Range of the next block.
+    #[inline(always)]
+    pub fn next_block(&self) -> Range<usize> {
+        self.next_start..self.next_end
+    }
+
+    /// Initial step that fetches the first block.
+    #[inline]
+    fn pre_induce(&mut self, mut rbuf: RBUF, mut wbuf: WBUF) {
+        rbuf.reset(self.next_end - self.next_start);
+        wbuf.reset();
+        self.flush.ready(wbuf);
+        self.fetch.ready((self.next_block(), rbuf));
+        wbuf = self.flush.wait();
+        self.flush.ready(wbuf);
+    }
+
+    /// Final step that waits for the workers to be done.
+    #[inline]
+    fn post_induce(&mut self) -> (RBUF, WBUF) {
+        let mut rbuf = self.fetch.wait();
+        rbuf.reset(0);
+        self.fetch.ready((self.next_block(), rbuf));
+        let mut wbuf = self.flush.wait();
+        rbuf = self.fetch.wait();
+        (rbuf, wbuf)
+    }
+
+    /// Get the read buffer then start the next fetch before inducing a block.
+    #[inline]
+    fn sync_fetch(&mut self) {
+        // alter the block boundaries.
+        self.cur_start = self.next_start;
+        self.cur_end = self.next_end;
+        if !self.backward {
+            self.next_start = self.next_end;
+            self.next_end = Ord::min(self.next_end.saturating_add(self.block_size), self.length);
+        } else {
+            self.next_end = self.next_start;
+            self.next_start = self.next_start.saturating_sub(self.block_size);
+        }
+
+        // reload the fetch worker.
+        let mut rbuf = self.fetch.wait();
+        self.rbuf.reset(self.cur_end - self.cur_start);
+        swap(&mut self.rbuf, &mut rbuf);
+        self.fetch.ready((self.next_block(), rbuf));
+    }
+
+    /// Start the next flush after inducing a block.
+    #[inline]
+    fn sync_flush(&mut self) {
+        // reload the flush worker.
+        let mut wbuf = self.flush.wait();
+        swap(&mut self.wbuf, &mut wbuf);
+        self.flush.ready(wbuf);
+        self.wbuf.reset();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
-    use std::mem::swap;
+    use std::ops::Range;
 
     use super::*;
 
-    struct Buf(pub usize, PhantomData<Vec<u32>>);
+    #[derive(Clone)]
+    struct Buf(Range<usize>, PhantomData<Vec<u32>>);
 
     impl Buf {
-        pub fn new() -> Self {
-            Buf(std::usize::MAX, PhantomData)
+        pub fn new(range: Range<usize>) -> Self {
+            Buf(range, PhantomData)
+        }
+
+        pub fn get(&self) -> Range<usize> {
+            self.0.clone()
+        }
+
+        pub fn set(&mut self, range: Range<usize>) {
+            self.0 = range
         }
     }
-    #[quickcheck]
-    fn quickcheck_pipeline_outer(n: usize) {
-        if n == 0 {
-            return;
-        }
-        let mut pipeline = Pipeline::new();
 
-        // simulate the time sequence of outer level induce pipeline.
-        pipeline.outer_induce(
-            |buf| buf,
-            |buf| buf,
-            |fetch, flush| {
-                let mut rbuf = Buf::new();
-                let mut rbuf_fetch = Buf::new();
-                let mut wbuf = Buf::new();
-                let mut wbuf_flush;
+    impl ReadBuffer for Buf {
+        fn reset(&mut self, _: usize) {}
+    }
 
-                rbuf_fetch.0 = 0;
-                fetch.ready(rbuf_fetch);
-
-                for i in 0..n {
-                    rbuf_fetch = fetch.wait();
-                    swap(&mut rbuf, &mut rbuf_fetch);
-                    rbuf_fetch.0 = i + 1;
-                    fetch.ready(rbuf_fetch);
-
-                    assert_eq!(rbuf.0, i);
-
-                    if i == 0 {
-                        wbuf_flush = Buf::new();
-                    } else {
-                        wbuf_flush = flush.wait();
-                        assert_eq!(wbuf_flush.0, i + 1);
-                    }
-                    swap(&mut wbuf, &mut wbuf_flush);
-                    wbuf_flush.0 = i + 2;
-                    flush.ready(wbuf_flush);
-                }
-
-                fetch.wait();
-                flush.wait();
-            },
-        );
+    impl WriteBuffer for Buf {
+        fn reset(&mut self) {}
     }
 
     #[quickcheck]
-    fn quickcheck_pipeline_inner(n: usize) {
-        if n == 0 {
-            return;
-        }
+    fn quickcheck_pipeline_reuse(length: usize, block_size: usize, times: usize) {
+        let times = Ord::min(times, 100);
+        let (length, block_size, _) = get_checked_params(length, block_size).unwrap_or((1, 1, 1));
+
         let mut pipeline = Pipeline::new();
+        let buffers = (Buf::new(0..0), Buf::new(0..0), Buf::new(0..0), Buf::new(0..0));
 
-        // simulate the time sequence of inner level induce pipeline.
-        let mut rbuf = Buf::new();
-        let mut rbuf_fetch = Buf::new();
-        let mut wbuf = Buf::new();
-        let mut wbuf_flush = Buf::new();
-        pipeline.inner_induce(
+        pipeline.induce_outer(
+            false,
+            length,
+            block_size,
+            buffers.clone(),
+            |(_, buf)| buf,
             |buf| buf,
-            |buf| buf,
-            |fetch, flush| {
-                flush.ready(wbuf_flush);
-                rbuf_fetch.0 = 0;
-                fetch.ready(rbuf_fetch);
-                wbuf_flush = flush.wait();
-                wbuf_flush.0 = 1;
-                flush.ready(wbuf_flush);
-
-                for i in 0..n {
-                    rbuf_fetch = fetch.wait();
-                    swap(&mut rbuf, &mut rbuf_fetch);
-                    rbuf_fetch.0 = i + 1;
-                    fetch.ready(rbuf_fetch);
-
-                    assert_eq!(rbuf.0, i);
-
-                    wbuf_flush = flush.wait();
-                    swap(&mut wbuf, &mut wbuf_flush);
-                    wbuf_flush.0 = i + 2;
-                    flush.ready(wbuf_flush);
-
-                    assert_eq!(wbuf.0, i + 1);
-                }
-
-                fetch.ready(fetch.wait());
-                rbuf_fetch = fetch.wait();
-                wbuf_flush = flush.wait();
-            },
+            |_| {},
         );
-    }
 
-    #[quickcheck]
-    fn quickcheck_pipeline_reuse(n: usize) {
-        let mut pipeline = Pipeline::new();
-        pipeline.inner_induce(
-            |x| x,
-            |x| x,
-            |worker_a, worker_b| {
-                worker_a.ready(0);
-                worker_b.ready(0);
-                assert_eq!(worker_a.wait(), 0);
-                assert_eq!(worker_b.wait(), 0);
-            },
-        );
-        for i in 1..=n {
-            pipeline.outer_induce(
-                |x| x,
-                |x| x,
-                |worker_a, worker_b| {
-                    worker_a.ready(i);
-                    worker_b.ready(i);
-                    assert_eq!(worker_a.wait(), i);
-                    assert_eq!(worker_b.wait(), i);
-                },
+        for _ in 0..times {
+            pipeline.induce_inner(
+                false,
+                length,
+                block_size,
+                buffers.clone(),
+                |(_, buf)| buf,
+                |buf| buf,
+                |_| {},
             );
         }
+    }
+
+    #[quickcheck]
+    fn quickcheck_pipeline_outer(length: usize, block_size: usize) {
+        let (length, block_size, last_block_size) = get_checked_params(length, block_size).unwrap_or((1, 1, 1));
+        let mut pipeline = Pipeline::new();
+
+        // simulate the first stage of outer-level induce.
+        let mut i = 0;
+        let mut p = 0..0;
+        let mut pp = 0..0;
+        let mut last = 0..0;
+        let buffers = (Buf::new(0..0), Buf::new(0..0), Buf::new(0..0), Buf::new(0..0));
+        pipeline.induce_outer(
+            false,
+            length,
+            block_size,
+            buffers,
+            |(range, mut rbuf): (Range<usize>, Buf)| {
+                rbuf.set(range);
+                rbuf
+            },
+            |wbuf| wbuf,
+            |ctx| {
+                let start = Ord::min(i * block_size, length);
+                let end = Ord::min((i + 1) * block_size, length);
+                assert_eq!(ctx.cur_block(), start..end);
+                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                assert_eq!(ctx.wbuf.get(), pp);
+
+                ctx.wbuf.set(ctx.cur_block());
+                last = ctx.cur_block();
+                pp = p.clone();
+                p = ctx.cur_block();
+                i += 1;
+            },
+        );
+        assert_ne!(last.end - last.start, 0);
+        assert_eq!(last, length - last_block_size..length);
+
+        // simulate the second stage of outer-level induce.
+        let mut i = 0;
+        let mut p = length..length;
+        let mut pp = length..length;
+        let mut last = length..length;
+        let buffers = (
+            Buf::new(length..length),
+            Buf::new(length..length),
+            Buf::new(length..length),
+            Buf::new(length..length),
+        );
+        pipeline.induce_outer(
+            true,
+            length,
+            block_size,
+            buffers,
+            |(range, mut rbuf): (Range<usize>, Buf)| {
+                rbuf.set(range);
+                rbuf
+            },
+            |wbuf| wbuf,
+            |ctx| {
+                let start = length.saturating_sub((i + 1) * block_size);
+                let end = length.saturating_sub(i * block_size);
+                assert_eq!(ctx.cur_block(), start..end);
+                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                assert_eq!(ctx.wbuf.get(), pp);
+
+                ctx.wbuf.set(ctx.cur_block());
+                last = ctx.cur_block();
+                pp = p.clone();
+                p = ctx.cur_block();
+                i += 1;
+            },
+        );
+        assert_ne!(last.end - last.start, 0);
+        assert_eq!(last, 0..last_block_size);
+    }
+
+    #[quickcheck]
+    fn quickcheck_pipeline_inner(length: usize, block_size: usize) {
+        let (length, block_size, last_block_size) = get_checked_params(length, block_size).unwrap_or((1, 1, 1));
+        let mut pipeline = Pipeline::new();
+
+        // simulate the first stage of inner-level induce.
+        let mut i = 0;
+        let mut p = 0..0;
+        let mut pp = 0..0;
+        let mut last = 0..0;
+        let buffers = (Buf::new(0..0), Buf::new(0..0), Buf::new(0..0), Buf::new(0..0));
+        pipeline.induce_inner(
+            false,
+            length,
+            block_size,
+            buffers,
+            |(range, mut rbuf): (Range<usize>, Buf)| {
+                rbuf.set(range);
+                rbuf
+            },
+            |wbuf| wbuf,
+            |ctx| {
+                let start = Ord::min(i * block_size, length);
+                let end = Ord::min((i + 1) * block_size, length);
+                assert_eq!(ctx.cur_block(), start..end);
+                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                assert_eq!(ctx.wbuf.get(), pp);
+
+                ctx.wbuf.set(ctx.cur_block());
+                last = ctx.cur_block();
+                pp = p.clone();
+                p = ctx.cur_block();
+                i += 1;
+            },
+        );
+        assert_ne!(last.end - last.start, 0);
+        assert_eq!(last, length - last_block_size..length);
+
+        // simulate the second stage of inner-level induce.
+        let mut i = 0;
+        let mut p = length..length;
+        let mut pp = length..length;
+        let mut last = length..length;
+        let buffers = (
+            Buf::new(length..length),
+            Buf::new(length..length),
+            Buf::new(length..length),
+            Buf::new(length..length),
+        );
+        pipeline.induce_inner(
+            true,
+            length,
+            block_size,
+            buffers,
+            |(range, mut rbuf): (Range<usize>, Buf)| {
+                rbuf.set(range);
+                rbuf
+            },
+            |wbuf| wbuf,
+            |ctx| {
+                let start = length.saturating_sub((i + 1) * block_size);
+                let end = length.saturating_sub(i * block_size);
+                assert_eq!(ctx.cur_block(), start..end);
+                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                assert_eq!(ctx.wbuf.get(), pp);
+
+                ctx.wbuf.set(ctx.cur_block());
+                last = ctx.cur_block();
+                pp = p.clone();
+                p = ctx.cur_block();
+                i += 1;
+            },
+        );
+        assert_ne!(last.end - last.start, 0);
+        assert_eq!(last, 0..last_block_size);
+    }
+
+    // helper functions.
+
+    fn get_checked_params(length: usize, mut block_size: usize) -> Option<(usize, usize, usize)> {
+        if length == 0 {
+            return None;
+        }
+        block_size = if block_size % length != 0 {
+            block_size % length
+        } else {
+            length
+        };
+        let last_block_size = if length % block_size != 0 {
+            length % block_size
+        } else {
+            block_size
+        };
+        Some((length, block_size, last_block_size))
     }
 }
