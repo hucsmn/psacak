@@ -13,7 +13,7 @@ use super::types::*;
 const BLOCK_SIZE: usize = 128 * 1024;
 
 /// Threshold to enable induce sorting in parallel.
-const THRESHOLD_PARALLEL_INDUCE: usize = 3 * BLOCK_SIZE;
+const THRESHOLD_PARALLEL_INDUCE: usize = 2 * BLOCK_SIZE;
 
 /// The outer level SACA-K algorithm for byte strings.
 #[inline]
@@ -116,7 +116,7 @@ fn induce_sort(
     block_size: usize,
     left_most: bool,
 ) {
-    if text.len() > THRESHOLD_PARALLEL_INDUCE {
+    if text.len() >= THRESHOLD_PARALLEL_INDUCE {
         // induce sort in parallel using pipeline.
         par_induce_sort(text, suf, bkt, pipeline, block_size, left_most);
     } else {
@@ -213,7 +213,7 @@ fn par_induce_sort(
 
     // stage 1. induce l (or lml) from lms.
 
-    // induce from the sentinel.
+    // induce from the sentinel, and setup states.
     bkt.set_head();
     let mut prev_c0 = text[text.len() - 1];
     let mut p = bkt[prev_c0] as usize;
@@ -222,12 +222,15 @@ fn par_induce_sort(
     }
     p += 1;
 
+    // setup buffers.
     let mut buffers = (
         RBuf::with_capacity(block_size),
         RBuf::with_capacity(block_size),
         WBuf::with_capacity(block_size),
         WBuf::with_capacity(block_size),
     );
+
+    // pipeline of the forward scanning.
     buffers = pipeline.induce_outer(
         false,
         suf.len(),
@@ -282,10 +285,12 @@ fn par_induce_sort(
 
     // stage 2. induce s or (lms) from l (or lml).
 
+    // setup states.
     bkt.set_tail();
     let mut prev_c0 = 255;
     let mut p = bkt[prev_c0] as usize;
 
+    // pipeline of the backward scanning.
     buffers = pipeline.induce_outer(
         true,
         suf.len(),

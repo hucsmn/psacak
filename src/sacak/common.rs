@@ -300,6 +300,12 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
         T::Atomic::store(transmute(&self.slice[i]), x, Ordering::Relaxed);
     }
 
+    /// Decrease element atomically, and get the original value.
+    #[inline(always)]
+    pub unsafe fn decrease(&self, i: usize) -> T {
+        T::Atomic::fetch_sub(transmute(&self.slice[i]), T::ONE, Ordering::Relaxed)
+    }
+
     // Create a parallel atomic iterator.
     #[inline]
     pub unsafe fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + 'a {
