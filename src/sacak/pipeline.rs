@@ -329,8 +329,8 @@ impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
 
         // reload the fetch worker.
         let mut rbuf = self.fetch.wait();
-        self.rbuf.reset(self.cur_end - self.cur_start);
         swap(&mut self.rbuf, &mut rbuf);
+        rbuf.reset(self.next_end - self.next_start);
         self.fetch.ready((self.next_block(), rbuf));
     }
 
