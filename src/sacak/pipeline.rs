@@ -279,16 +279,28 @@ impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
         }
     }
 
-    /// Range of the current block.
+    /// Start of the current block.
     #[inline(always)]
-    pub fn cur_block(&self) -> Range<usize> {
-        self.cur_start..self.cur_end
+    pub fn cur_start(&self) -> usize {
+        self.cur_start
     }
 
-    /// Range of the next block.
+    /// End of the current block.
     #[inline(always)]
-    pub fn next_block(&self) -> Range<usize> {
-        self.next_start..self.next_end
+    pub fn cur_end(&self) -> usize {
+        self.cur_end
+    }
+
+    /// Start of the next block.
+    #[inline(always)]
+    pub fn next_start(&self) -> usize {
+        self.next_start
+    }
+
+    /// End of the next block.
+    #[inline(always)]
+    pub fn next_end(&self) -> usize {
+        self.next_end
     }
 
     /// Initial step that fetches the first block.
@@ -297,7 +309,7 @@ impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
         rbuf.reset(self.next_end - self.next_start);
         wbuf.reset();
         self.flush.ready(wbuf);
-        self.fetch.ready((self.next_block(), rbuf));
+        self.fetch.ready((self.next_start..self.next_end, rbuf));
         wbuf = self.flush.wait();
         self.flush.ready(wbuf);
     }
@@ -307,7 +319,7 @@ impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
     fn post_induce(&mut self) -> (RBUF, WBUF) {
         let mut rbuf = self.fetch.wait();
         rbuf.reset(0);
-        self.fetch.ready((self.next_block(), rbuf));
+        self.fetch.ready((self.next_start..self.next_end, rbuf));
         let mut wbuf = self.flush.wait();
         rbuf = self.fetch.wait();
         (rbuf, wbuf)
@@ -331,7 +343,7 @@ impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
         let mut rbuf = self.fetch.wait();
         swap(&mut self.rbuf, &mut rbuf);
         rbuf.reset(self.next_end - self.next_start);
-        self.fetch.ready((self.next_block(), rbuf));
+        self.fetch.ready((self.next_start..self.next_end, rbuf));
     }
 
     /// Start the next flush after inducing a block.
@@ -417,7 +429,6 @@ mod tests {
         let mut i = 0;
         let mut p = 0..0;
         let mut pp = 0..0;
-        let mut last = 0..0;
         let buffers = (Buf::new(0..0), Buf::new(0..0), Buf::new(0..0), Buf::new(0..0));
         pipeline.induce_outer(
             false,
@@ -432,25 +443,25 @@ mod tests {
             |ctx| {
                 let start = Ord::min(i * block_size, length);
                 let end = Ord::min((i + 1) * block_size, length);
-                assert_eq!(ctx.cur_block(), start..end);
-                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                let cur_start = ctx.cur_start();
+                let cur_end = ctx.cur_end();
+                assert_eq!(cur_start..cur_end, start..end);
+                assert_eq!(ctx.rbuf.get(), cur_start..cur_end);
                 assert_eq!(ctx.wbuf.get(), pp);
 
-                ctx.wbuf.set(ctx.cur_block());
-                last = ctx.cur_block();
+                ctx.wbuf.set(cur_start..cur_end);
                 pp = p.clone();
-                p = ctx.cur_block();
+                p = cur_start..cur_end;
                 i += 1;
             },
         );
-        assert_ne!(last.end - last.start, 0);
-        assert_eq!(last, length - last_block_size..length);
+        assert_ne!(p.end - p.start, 0);
+        assert_eq!(p, length - last_block_size..length);
 
         // simulate the second stage of outer-level induce.
         let mut i = 0;
         let mut p = length..length;
         let mut pp = length..length;
-        let mut last = length..length;
         let buffers = (
             Buf::new(length..length),
             Buf::new(length..length),
@@ -470,19 +481,20 @@ mod tests {
             |ctx| {
                 let start = length.saturating_sub((i + 1) * block_size);
                 let end = length.saturating_sub(i * block_size);
-                assert_eq!(ctx.cur_block(), start..end);
-                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                let cur_start = ctx.cur_start();
+                let cur_end = ctx.cur_end();
+                assert_eq!(cur_start..cur_end, start..end);
+                assert_eq!(ctx.rbuf.get(), cur_start..cur_end);
                 assert_eq!(ctx.wbuf.get(), pp);
 
-                ctx.wbuf.set(ctx.cur_block());
-                last = ctx.cur_block();
+                ctx.wbuf.set(cur_start..cur_end);
                 pp = p.clone();
-                p = ctx.cur_block();
+                p = cur_start..cur_end;
                 i += 1;
             },
         );
-        assert_ne!(last.end - last.start, 0);
-        assert_eq!(last, 0..last_block_size);
+        assert_ne!(p.end - p.start, 0);
+        assert_eq!(p, 0..last_block_size);
     }
 
     #[quickcheck]
@@ -494,7 +506,6 @@ mod tests {
         let mut i = 0;
         let mut p = 0..0;
         let mut pp = 0..0;
-        let mut last = 0..0;
         let buffers = (Buf::new(0..0), Buf::new(0..0), Buf::new(0..0), Buf::new(0..0));
         pipeline.induce_inner(
             false,
@@ -509,25 +520,25 @@ mod tests {
             |ctx| {
                 let start = Ord::min(i * block_size, length);
                 let end = Ord::min((i + 1) * block_size, length);
-                assert_eq!(ctx.cur_block(), start..end);
-                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                let cur_start = ctx.cur_start();
+                let cur_end = ctx.cur_end();
+                assert_eq!(cur_start..cur_end, start..end);
+                assert_eq!(ctx.rbuf.get(), cur_start..cur_end);
                 assert_eq!(ctx.wbuf.get(), pp);
 
-                ctx.wbuf.set(ctx.cur_block());
-                last = ctx.cur_block();
+                ctx.wbuf.set(cur_start..cur_end);
                 pp = p.clone();
-                p = ctx.cur_block();
+                p = cur_start..cur_end;
                 i += 1;
             },
         );
-        assert_ne!(last.end - last.start, 0);
-        assert_eq!(last, length - last_block_size..length);
+        assert_ne!(p.end - p.start, 0);
+        assert_eq!(p, length - last_block_size..length);
 
         // simulate the second stage of inner-level induce.
         let mut i = 0;
         let mut p = length..length;
         let mut pp = length..length;
-        let mut last = length..length;
         let buffers = (
             Buf::new(length..length),
             Buf::new(length..length),
@@ -547,19 +558,20 @@ mod tests {
             |ctx| {
                 let start = length.saturating_sub((i + 1) * block_size);
                 let end = length.saturating_sub(i * block_size);
-                assert_eq!(ctx.cur_block(), start..end);
-                assert_eq!(ctx.rbuf.get(), ctx.cur_block());
+                let cur_start = ctx.cur_start();
+                let cur_end = ctx.cur_end();
+                assert_eq!(cur_start..cur_end, start..end);
+                assert_eq!(ctx.rbuf.get(), cur_start..cur_end);
                 assert_eq!(ctx.wbuf.get(), pp);
 
-                ctx.wbuf.set(ctx.cur_block());
-                last = ctx.cur_block();
+                ctx.wbuf.set(cur_start..cur_end);
                 pp = p.clone();
-                p = ctx.cur_block();
+                p = cur_start..cur_end;
                 i += 1;
             },
         );
-        assert_ne!(last.end - last.start, 0);
-        assert_eq!(last, 0..last_block_size);
+        assert_ne!(p.end - p.start, 0);
+        assert_eq!(p, 0..last_block_size);
     }
 
     // helper functions.

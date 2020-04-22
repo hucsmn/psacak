@@ -343,14 +343,10 @@ fn par_induce_sort(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline, block
         },
         |ctx| {
             // the induce routine.
-            let Range {
-                start: cur_start,
-                end: cur_end,
-            } = ctx.cur_block();
-            let Range {
-                start: next_start,
-                end: next_end,
-            } = ctx.next_block();
+            let cur_start = ctx.cur_start();
+            let cur_end = ctx.cur_end();
+            let next_start = ctx.next_start();
+            let next_end = ctx.next_end();
             for i in cur_start..cur_end {
                 if let Some((chr, pos)) = unsafe { ctx.rbuf.get(i - cur_start) } {
                     // the preceding character is already known as l-type. get its actual position,
@@ -441,14 +437,10 @@ fn par_induce_sort(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline, block
         },
         |ctx| {
             // the induce routine.
-            let Range {
-                start: cur_start,
-                end: cur_end,
-            } = ctx.cur_block();
-            let Range {
-                start: next_start,
-                end: next_end,
-            } = ctx.next_block();
+            let cur_start = ctx.cur_start();
+            let cur_end = ctx.cur_end();
+            let next_start = ctx.next_start();
+            let next_end = ctx.next_end();
             for i in (cur_start..cur_end).rev() {
                 if let Some((chr, pos)) = unsafe { ctx.rbuf.get(i - cur_start) } {
                     // the preceding character is already known as s-type. get its actual position
@@ -828,12 +820,12 @@ impl WBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::super::common::*;
     use super::super::pipeline::*;
     use super::super::types::*;
     use super::*;
-
-    use std::collections::BTreeMap;
 
     #[test]
     fn tablecheck_sacak32() {

@@ -248,7 +248,8 @@ fn par_induce_sort(
         },
         |ctx| {
             // the induce routine.
-            let Range { start, end } = ctx.cur_block();
+            let start = ctx.cur_start();
+            let end = ctx.cur_end();
             for i in start..end {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
@@ -308,7 +309,8 @@ fn par_induce_sort(
         },
         |ctx| {
             // the induce routine.
-            let Range { start, end } = ctx.cur_block();
+            let start = ctx.cur_start();
+            let end = ctx.cur_end();
             for i in (start..end).rev() {
                 let x = unsafe { suf.get(i) };
                 if x > 0 {
