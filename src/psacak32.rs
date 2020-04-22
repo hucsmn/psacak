@@ -17,13 +17,14 @@ const BLOCK_SIZE: usize = 64 * 1024;
 /// Threshold to enable induce sorting in parallel.
 const THRESHOLD_PARALLEL_INDUCE: usize = 2 * BLOCK_SIZE;
 
-/// The inner level SACA-K algorithm for unsigned integer strings.
+/// The inner-level pSACAK for unsigned integer strings.
 ///
 /// Assumes that characters are correctly translated to corresponding bucket pointers.
 #[inline]
-pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
-    let suf = &mut suf[..text.len()];
+pub fn psacak32(text: &[u32], mut suf: &mut [u32], pipeline: &mut Pipeline) {
+    debug_assert!(text.len() <= u32::LOWER_BITS as usize);
 
+    suf = &mut suf[..text.len()];
     if text.len() <= 3 {
         saca_tiny(text, suf);
         return;
@@ -39,7 +40,7 @@ pub fn sacak32(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline) {
     if k < n {
         // need to solve the subproblem recursively.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
-        sacak32(text1, suf1, pipeline);
+        psacak32(text1, suf1, pipeline);
     } else {
         // the subproblem itself is the inversed suffix array.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
@@ -841,13 +842,13 @@ mod tests {
         ];
 
         for &text in texts.iter() {
-            assert_eq!(calc_sacak32(text), calc_naive(text));
+            assert_eq!(calc_psacak32(text), calc_naive(text));
         }
     }
 
     #[quickcheck]
     fn quickcheck_sacak32(text: Vec<u32>) -> bool {
-        calc_sacak32(&text[..]) == calc_naive(&text[..])
+        calc_psacak32(&text[..]) == calc_naive(&text[..])
     }
 
     #[quickcheck]
@@ -869,10 +870,10 @@ mod tests {
 
     // helper functions.
 
-    fn calc_sacak32(text: &[u32]) -> Vec<u32> {
-        let mut suf = vec![0u32; text.len()];
+    fn calc_psacak32(text: &[u32]) -> Vec<u32> {
+        let mut suf = vec![0; text.len()];
         if let Some(text) = translate_sample(text) {
-            sacak32(&text[..], &mut suf[..], &mut Pipeline::new());
+            psacak32(&text[..], &mut suf[..], &mut Pipeline::new());
         } else {
             saca_tiny(&text[..], &mut suf[..]);
         }
@@ -880,7 +881,7 @@ mod tests {
     }
 
     fn calc_naive(text: &[u32]) -> Vec<u32> {
-        let mut suf = vec![0u32; text.len()];
+        let mut suf = vec![0; text.len()];
         saca_tiny(text, &mut suf[..]);
         suf
     }

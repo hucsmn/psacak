@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use super::common::*;
 use super::naming::*;
 use super::pipeline::*;
-use super::sacak32::sacak32;
+use super::psacak32::psacak32;
 use super::types::*;
 
 /// Block size for induce sorting in parallel.
@@ -14,14 +14,12 @@ const BLOCK_SIZE: usize = 128 * 1024;
 /// Threshold to enable induce sorting in parallel.
 const THRESHOLD_PARALLEL_INDUCE: usize = 2 * BLOCK_SIZE;
 
-/// The outer level SACA-K algorithm for byte strings.
+/// The outer-level pSACAK for byte strings.
 #[inline]
-pub fn sacak8(text: &[u8], suf: &mut [u32]) {
-    assert!(text.len() <= u32::MAX as usize);
-    assert!(text.len() <= suf.len());
+pub fn psacak8(text: &[u8], mut suf: &mut [u32]) {
+    debug_assert!(text.len() < u32::MAX as usize);
 
-    let suf = &mut suf[..text.len()];
-
+    suf = &mut suf[..text.len()];
     if text.len() <= 3 {
         saca_tiny(text, suf);
         return;
@@ -39,7 +37,7 @@ pub fn sacak8(text: &[u8], suf: &mut [u32]) {
     if k < n {
         // need to solve the subproblem recursively.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
-        sacak32(text1, suf1, &mut pipeline);
+        psacak32(text1, suf1, &mut pipeline);
     } else {
         // the subproblem itself is the inversed suffix array.
         let (suf1, text1) = suf.split_at_mut(suf.len() - n);
@@ -526,13 +524,13 @@ mod tests {
         ];
 
         for &text in texts.iter() {
-            assert_eq!(calc_sacak8(text), calc_naive8(text));
+            assert_eq!(calc_psacak8(text), calc_naive8(text));
         }
     }
 
     #[quickcheck]
     fn quickcheck_sacak8(text: Vec<u8>) -> bool {
-        calc_sacak8(&text[..]) == calc_naive8(&text[..])
+        calc_psacak8(&text[..]) == calc_naive8(&text[..])
     }
 
     #[quickcheck]
@@ -552,14 +550,14 @@ mod tests {
 
     // helper functions.
 
-    fn calc_sacak8(text: &[u8]) -> Vec<u32> {
-        let mut suf = vec![0u32; text.len()];
-        sacak8(text, &mut suf[..]);
+    fn calc_psacak8(text: &[u8]) -> Vec<u32> {
+        let mut suf = vec![0; text.len()];
+        psacak8(text, &mut suf[..]);
         suf
     }
 
     fn calc_naive8(text: &[u8]) -> Vec<u32> {
-        let mut suf = vec![0u32; text.len()];
+        let mut suf = vec![0; text.len()];
         saca_tiny(text, &mut suf[..]);
         suf
     }

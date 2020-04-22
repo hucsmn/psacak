@@ -15,6 +15,8 @@ where
     C: SacaChar,
     I: SacaIndex,
 {
+    debug_assert!(text.len() < u32::MAX as usize);
+
     suf = &mut suf[..text.len()];
     for (i, p) in suf.iter_mut().enumerate() {
         *p = I::from_index(i);
@@ -282,12 +284,10 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     // Create a parallel atomic iterator.
     #[inline]
     pub unsafe fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + 'a {
-        self.slice
-            .par_iter()
-            .map(|p| {
-                let p = (p as *const T as *const T::Atomic).as_ref().unwrap();
-                p.load(Ordering::Relaxed)
-            })
+        self.slice.par_iter().map(|p| {
+            let p = (p as *const T as *const T::Atomic).as_ref().unwrap();
+            p.load(Ordering::Relaxed)
+        })
     }
 }
 
