@@ -212,14 +212,6 @@ macro_rules! impl_atomic {
 // TODO: rewrite when `#[cfg(target_has_atomic = "<width>")]` comes to stable.
 cfg_if! {
     if #[cfg(any(
-        all(target_arch = "x86_64", target_os="macos"),
-        all(target_arch = "aarch64", not(target_os="windows")),
-    ))]
-    {
-        // platforms support atomic u8..u128.
-        use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, AtomicU128, AtomicUsize};
-        impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, u64 AtomicU64, u128 AtomicU128, usize AtomicUsize);
-    } else if #[cfg(any(
         target_arch = "x86_64",
         target_arch = "x86",
         target_arch = "aarch64",
@@ -241,7 +233,6 @@ cfg_if! {
     ))]
     {
         // platforms support atomic u8..u32.
-        // known bug: target thumbv6m-none-eabi does not support atomic at all.
         use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicUsize};
         impl_atomic!(u8 AtomicU8, u16 AtomicU16, u32 AtomicU32, usize AtomicUsize);
     }
