@@ -9,11 +9,16 @@ rayon = "1.3"
 crossbeam = "0.7"
 scoped_threadpool = "0.1"
 libc = { version = "0.2", optional = true }
+clap = { version = "2.33", optional = true }
 
 [dev-dependencies]
 quickcheck = "0.9"
 quickcheck_macros = "0.9"
 
+[features]
+default = []
+bin = ["libc", "clap"]
+
 [[bin]]
 name = "psacak"
-required-features = ["libc"]
+required-features = ["bin"]

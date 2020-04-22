@@ -1,44 +1,44 @@
 //! The pSACAK suffix sorting algorithm for huge in-memory data on multicore machine.
 //!
 //! The algorithm is described in this [paper](https://doi.org/10.1109/TC.2018.2842050).
-//! 
+//!
 //! # Examples
-//! 
+//!
 //! Create new suffix array.
-//! 
+//!
 //! ```rust
 //! use psacak::psacak;
-//! 
+//!
 //! let text = b"mississippi";
 //! let suf = psacak(text);
-//! 
+//!
 //! assert_eq!(suf, vec![10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2]);
 //! ```
-//! 
+//!
 //! Compute the suffix array in a slice.
-//! 
+//!
 //! ```rust
 //! use psacak::psacak_inplace;
-//! 
+//!
 //! let text = b"mississippi";
 //! let mut suf = vec![0; text.len()];
 //! psacak_inplace(text, &mut suf[..]);
-//! 
+//!
 //! assert_eq!(suf, vec![10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2]);
 //! ```
-//! 
+//!
 //! Note that the position of sentinel is not presented in the suffix array calculated by pSACAK.
-//! 
+//!
 //! To obtain a suffix array which included the position of sentinel, you can try this:
-//! 
+//!
 //! ```rust
 //! use psacak::psacak_inplace;
-//! 
+//!
 //! let text = b"mississippi";
 //! let mut suf = vec![0; text.len() + 1];
 //! suf[0] = text.len() as u32;
 //! psacak_inplace(text, &mut suf[1..]);
-//! 
+//!
 //! assert_eq!(suf, vec![11, 10, 7, 4, 1, 0, 9, 8, 6, 3, 5, 2]);
 //! ```
 

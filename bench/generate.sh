@@ -13,8 +13,8 @@ random_data() {
 }
 
 mkdir data &> /dev/null
-for length in {16,64,128}; do
-  for alphabet in {4,16,128,256}; do
+for length in {256,1024}; do
+  for alphabet in {004,128,256}; do
     output="data/random-k${alphabet}-${length}m"
     echo "generate $output (alphabet: ${alphabet}, size: ${length}m)"
     random_data "$length" "$alphabet" > "$output"
