@@ -229,22 +229,6 @@ where
     (low, high)
 }
 
-/// Normalize generic ranges of slice to the range type.
-#[inline(always)]
-fn normalize_range<R: RangeBounds<usize>>(range: R, len: usize) -> Range<usize> {
-    let start = match range.start_bound() {
-        Bound::Included(&x) => x,
-        Bound::Excluded(&x) => x.saturating_add(1),
-        Bound::Unbounded => 0,
-    };
-    let end = match range.end_bound() {
-        Bound::Included(&x) => x.saturating_add(1),
-        Bound::Excluded(&x) => x,
-        Bound::Unbounded => len,
-    };
-    start..end
-}
-
 /// Calculate `ceil(x/y)`.
 #[inline(always)]
 pub fn ceil_divide(x: usize, y: usize) -> usize {
@@ -268,7 +252,7 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     #[inline]
     pub fn new(slice: &'a mut [T]) -> Self {
         // assert array is well-aligned.
-        assert_eq!(0, (&slice[0] as *const T).align_offset(align_of::<T>()));
+        assert_eq!(0, slice.as_ptr().align_offset(align_of::<T>()));
         AtomicSlice { slice }
     }
 
@@ -281,8 +265,21 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     /// Make subslice.
     #[inline(always)]
     pub fn slice<R: RangeBounds<usize>>(&self, range: R) -> Self {
-        AtomicSlice {
-            slice: &self.slice[normalize_range(range, self.len())],
+        let start = match range.start_bound() {
+            Bound::Included(&x) => x,
+            Bound::Excluded(&x) => x.saturating_add(1),
+            Bound::Unbounded => 0,
+        };
+        match range.end_bound() {
+            Bound::Included(&end) => AtomicSlice {
+                slice: &self.slice[start..=end],
+            },
+            Bound::Excluded(&end) => AtomicSlice {
+                slice: &self.slice[start..end],
+            },
+            Bound::Unbounded => AtomicSlice {
+                slice: &self.slice[start..],
+            },
         }
     }
 
