@@ -1,4 +1,4 @@
-use std::mem::{align_of, transmute};
+use std::mem::align_of;
 use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::Ordering;
 
@@ -10,13 +10,14 @@ use super::types::*;
 const THRESHOLD_PARALLEL_RESET: usize = 1024 * 1024;
 
 /// A stupid suffix array construction algorithm that handles tiny input.
-pub fn saca_tiny<C, I>(text: &[C], suf: &mut [I])
+pub fn saca_tiny<C, I>(text: &[C], mut suf: &mut [I])
 where
     C: SacaChar,
     I: SacaIndex,
 {
-    for i in 0..text.len() {
-        suf[i] = I::from_index(i);
+    suf = &mut suf[..text.len()];
+    for (i, p) in suf.iter_mut().enumerate() {
+        *p = I::from_index(i);
     }
     suf[..text.len()].sort_by(|&i, &j| Ord::cmp(&text[i.as_index()..], &text[j.as_index()..]));
 }
@@ -224,7 +225,8 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     /// Create new mutable atomic unsigned integer slice adaptor.
     #[inline]
     pub fn new(slice: &'a mut [T]) -> Self {
-        // assert array is well-aligned.
+        // assert array is well-aligned, thus we could cast the pointer to perform atomic operations,
+        // because atomic integers are guaranteed to have the same layout as the plain integers.
         assert_eq!(0, slice.as_ptr().align_offset(align_of::<T>()));
         AtomicSlice { slice }
     }
@@ -259,21 +261,22 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     /// Get element atomically.
     #[inline(always)]
     pub unsafe fn get(&self, i: usize) -> T {
-        // Atomic integers are guaranteed to have the same layout as the plain integers.
-        T::Atomic::load(transmute(&self.slice[i]), Ordering::Relaxed)
+        let p = (&self.slice[i] as *const T as *const T::Atomic).as_ref().unwrap();
+        p.load(Ordering::Relaxed)
     }
 
     /// Set element atomically.
     #[inline(always)]
     pub unsafe fn set(&self, i: usize, x: T) {
-        // Atomic integers are guaranteed to have the same layout as the plain integers.
-        T::Atomic::store(transmute(&self.slice[i]), x, Ordering::Relaxed);
+        let p = (&self.slice[i] as *const T as *const T::Atomic).as_ref().unwrap();
+        p.store(x, Ordering::Relaxed);
     }
 
     /// Decrease element atomically, and get the original value.
     #[inline(always)]
     pub unsafe fn decrease(&self, i: usize) -> T {
-        T::Atomic::fetch_sub(transmute(&self.slice[i]), T::ONE, Ordering::Relaxed)
+        let p = (&self.slice[i] as *const T as *const T::Atomic).as_ref().unwrap();
+        p.fetch_sub(T::ONE, Ordering::Relaxed)
     }
 
     // Create a parallel atomic iterator.
@@ -281,7 +284,10 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
     pub unsafe fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + 'a {
         self.slice
             .par_iter()
-            .map(|p| T::Atomic::load(transmute(p), Ordering::Relaxed))
+            .map(|p| {
+                let p = (p as *const T as *const T::Atomic).as_ref().unwrap();
+                p.load(Ordering::Relaxed)
+            })
     }
 }
 

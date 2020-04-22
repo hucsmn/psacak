@@ -180,7 +180,6 @@ where
     let (lmssubs, work) = suf.split_at_mut(n);
     let chunk_size = ceil_divide(n - 1, jobs);
     let i0s = (0..ceil_divide(n - 1, chunk_size))
-        .into_iter()
         .map(|i| lmssubs[i * chunk_size])
         .collect::<Vec<_>>();
     let mut k0s = lmssubs[1..]
@@ -190,12 +189,12 @@ where
             let mut k0 = I::ZERO;
             let mut i0 = i0.as_index();
             let mut fp0 = FP::get(text, i0);
-            for i in 0..chunk.len() {
-                let i1 = chunk[i].as_index();
+            for lms in chunk.iter_mut() {
+                let i1 = lms.as_index();
                 let fp1 = FP::get(text, i1);
                 if !FP::equals(text, i0, fp0, i1, fp1) {
                     // directly store difference bit in suf[..n].
-                    chunk[i] |= I::HIGHEST_BIT;
+                    *lms |= I::HIGHEST_BIT;
                     k0 += I::ONE;
                 }
                 i0 = i1;
@@ -220,13 +219,15 @@ where
             .zip(k0s.into_par_iter())
             .for_each(|(chunk, k0)| {
                 let mut k = k0.as_index();
-                for i in 0..chunk.len() {
-                    if chunk[i] & I::HIGHEST_BIT != I::ZERO {
+                for x in chunk.iter().cloned() {
+                    let eq = x & I::HIGHEST_BIT;
+                    let lms = x & I::LOWER_BITS;
+                    if eq != I::ZERO {
                         k += 1;
                     }
-                    // provable: no element would be written twice.
                     unsafe {
-                        let pos = (chunk[i] & I::LOWER_BITS).as_index() / 2;
+                        // provable: no element would be written for twice.
+                        let pos = lms.as_index() / 2;
                         work.set(pos, I::from_index(k));
                     }
                 }

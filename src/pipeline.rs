@@ -421,6 +421,7 @@ mod tests {
     }
 
     #[quickcheck]
+    #[allow(unused_parens)]
     fn quickcheck_pipeline_outer(length: usize, block_size: usize) {
         let (length, block_size, last_block_size) = get_checked_params(length, block_size).unwrap_or((1, 1, 1));
         let mut pipeline = Pipeline::new();
@@ -498,6 +499,7 @@ mod tests {
     }
 
     #[quickcheck]
+    #[allow(unused_parens)]
     fn quickcheck_pipeline_inner(length: usize, block_size: usize) {
         let (length, block_size, last_block_size) = get_checked_params(length, block_size).unwrap_or((1, 1, 1));
         let mut pipeline = Pipeline::new();
