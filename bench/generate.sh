@@ -12,6 +12,7 @@ random_data() {
   dd status=none if=/dev/urandom bs=1M count="$length" | tr "$set0" "$set1"
 }
 
+mkdir data &> /dev/null
 for length in {16,64,128}; do
   for alphabet in {4,16,128,256}; do
     output="data/random-k${alphabet}-${length}m"

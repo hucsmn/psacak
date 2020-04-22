@@ -320,7 +320,7 @@ impl<RBUF: ReadBuffer, WBUF: WriteBuffer> InduceContext<RBUF, WBUF> {
         let mut rbuf = self.fetch.wait();
         rbuf.reset(0);
         self.fetch.ready((self.next_start..self.next_end, rbuf));
-        let mut wbuf = self.flush.wait();
+        let wbuf = self.flush.wait();
         rbuf = self.fetch.wait();
         (rbuf, wbuf)
     }

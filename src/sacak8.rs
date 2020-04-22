@@ -1,4 +1,3 @@
-use std::mem::swap;
 use std::ops::{Index, IndexMut, Range};
 
 use rayon::prelude::*;
@@ -76,7 +75,7 @@ fn put_lmscharacters(text: &[u8], suf: &mut [u32], bkt: &mut Buckets) {
 
 /// Put the sorted lms-suffixes, originally located in head of workspace, to their corresponding bucket tails.
 #[inline]
-fn put_lmssuffixes(text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
+fn put_lmssuffixes(_text: &[u8], suf: &mut [u32], bkt: &mut Buckets, mut n: usize) {
     bkt.set_tail();
     reset_slice(&mut suf[n..], 0);
 
@@ -292,7 +291,7 @@ fn par_induce_sort(
     let mut p = bkt[prev_c0] as usize;
 
     // pipeline of the backward scanning.
-    buffers = pipeline.induce_outer(
+    pipeline.induce_outer(
         true,
         suf.len(),
         block_size,
@@ -504,7 +503,6 @@ impl WriteBuffer for WBuf {
 mod tests {
     use super::super::common::saca_tiny;
     use super::super::pipeline::Pipeline;
-    use super::super::types::*;
     use super::*;
 
     #[test]

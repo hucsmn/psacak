@@ -1,5 +1,3 @@
-use std::sync::atomic::Ordering;
-
 use rayon::prelude::*;
 
 use super::common::*;
@@ -216,12 +214,11 @@ where
     reset_slice(work, I::MAX);
     work[lmssubs[0].as_index() / 2] = I::ZERO;
     {
-        let work = unsafe { AtomicSlice::new(work) };
+        let work = AtomicSlice::new(work);
         lmssubs[1..]
             .par_chunks(chunk_size)
             .zip(k0s.into_par_iter())
-            .enumerate()
-            .for_each(|(i, (chunk, k0))| {
+            .for_each(|(chunk, k0)| {
                 let mut k = k0.as_index();
                 for i in 0..chunk.len() {
                     if chunk[i] & I::HIGHEST_BIT != I::ZERO {
@@ -263,7 +260,7 @@ where
 /// Preprocess the interim subproblem by translating characters to bucket pointers.
 #[inline]
 fn translate<I: SacaIndex + SacaChar>(text: &mut [I], bkt_tails: &[I]) {
-    foreach_typedchars_mut(text, |i, t, p| {
+    foreach_typedchars_mut(text, |_, t, p| {
         let c = p.as_index();
         if !t.stype {
             // l-type => bucket head.
@@ -319,7 +316,7 @@ impl<C: SacaChar> Fingerprint<C> for usize {
             return false;
         }
 
-        &text[i..p] == &text[j..q]
+        text[i..p] == text[j..q]
     }
 }
 
@@ -406,7 +403,7 @@ impl<C: SacaChar + As<X>, X: Uint> Fingerprint<C> for UintFingerprint<X> {
         }
         i += X::SIZE / C::SIZE;
         j += X::SIZE / C::SIZE;
-        &text[i..p] == &text[j..q]
+        text[i..p] == text[j..q]
     }
 }
 

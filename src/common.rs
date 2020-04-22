@@ -1,5 +1,5 @@
-use std::mem::{align_of, size_of, transmute};
-use std::ops::{Bound, Range, RangeBounds};
+use std::mem::{align_of, transmute};
+use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::Ordering;
 
 use rayon::prelude::*;
@@ -32,11 +32,6 @@ impl SacaCharType {
     #[inline(always)]
     pub fn is_lms(self) -> bool {
         self.stype && self.left_most
-    }
-
-    #[inline(always)]
-    pub fn is_lml(self) -> bool {
-        !self.stype && self.left_most
     }
 }
 
@@ -172,28 +167,6 @@ where
     n
 }
 
-/// Compact all the elements in given range of value to the right side of array.
-///
-/// Returns count of collected elements.
-#[inline]
-pub fn compact_right_range<T, R>(data: &mut [T], range: R) -> usize
-where
-    T: Uint,
-    R: RangeBounds<T>,
-{
-    let (low, high) = range_to_bounds(range);
-
-    let mut p = data.len();
-    for i in (0..data.len()).rev() {
-        let x = data[i];
-        if x >= low && x <= high {
-            p -= 1;
-            data[p] = x;
-        }
-    }
-    data.len() - p
-}
-
 /// Reset slice of integers.
 #[inline]
 pub fn reset_slice<T: Uint>(slice: &mut [T], reset: T) {
@@ -314,7 +287,6 @@ impl<'a, T: Uint + HasAtomic> AtomicSlice<'a, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::types::*;
     use super::*;
 
     #[quickcheck]

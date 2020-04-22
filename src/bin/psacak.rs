@@ -1,23 +1,11 @@
-#![allow(unused)]
-
-#[cfg(test)]
-extern crate quickcheck;
-#[cfg(test)]
-#[macro_use(quickcheck)]
-extern crate quickcheck_macros;
-#[macro_use(cfg_if)]
-extern crate cfg_if;
-
-mod sacak;
-
 use std::env;
 use std::fs;
-use std::io;
 use std::mem;
 use std::process;
 use std::time;
 
 use libc::{getrusage, rusage, RUSAGE_SELF};
+use psacak::psacak;
 
 const TIMES: usize = 1;
 
@@ -34,7 +22,7 @@ fn main() {
     let mut suf = vec![0; text.len()];
     let mut times = String::new();
     for _ in 0..TIMES {
-        let ((), dur) = timeit(|| sacak::sacak(&text[..], &mut suf[..]));
+        let ((), dur) = timeit(|| psacak(&text[..], &mut suf[..]));
         times.push_str(format!("{:.3}s ", dur.as_secs_f64()).as_str());
     }
     eprintln!(" time: {}", times);

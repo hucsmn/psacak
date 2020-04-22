@@ -361,7 +361,7 @@ fn par_induce_sort(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline, block
                     let final_idx = idx as usize - 1;
                     if ctx.contains(final_idx) && pos > 0 {
                         let j = (pos - 1) as usize;
-                        let c0 = text[pos as usize - 1];
+                        let c0 = text[j];
                         let c1 = chr;
                         if c0 >= c1 {
                             // c0 is l-type, and it finally belongs to the current or the next block.
@@ -455,7 +455,7 @@ fn par_induce_sort(text: &[u32], suf: &mut [u32], pipeline: &mut Pipeline, block
                     let final_idx = idx as usize;
                     if ctx.contains(final_idx) && pos > 0 {
                         let j = (pos - 1) as usize;
-                        let c0 = text[pos as usize - 1];
+                        let c0 = text[j];
                         let c1 = chr;
                         if c0 < c1 || (c0 == c1 && idx <= c0) {
                             // c0 is s-type, and it finally belongs to the current or the next block.
@@ -676,12 +676,6 @@ impl UnsafeRBuf {
     }
 
     #[inline(always)]
-    pub unsafe fn len(&self) -> usize {
-        let buf = self.buf.get().as_mut().unwrap();
-        buf.len()
-    }
-
-    #[inline(always)]
     pub unsafe fn get(&self, i: usize) -> (u32, u32) {
         let buf = self.buf.get().as_mut().unwrap();
         buf[i]
@@ -824,7 +818,6 @@ mod tests {
 
     use super::super::common::*;
     use super::super::pipeline::*;
-    use super::super::types::*;
     use super::*;
 
     #[test]
@@ -937,7 +930,7 @@ mod tests {
         }
 
         let mut text = Vec::from(text);
-        foreach_typedchars_mut(&mut text[..], |i, t, p| {
+        foreach_typedchars_mut(&mut text[..], |_, t, p| {
             let c = *p;
             if !t.stype {
                 *p = bkt.get(&c).unwrap().0;

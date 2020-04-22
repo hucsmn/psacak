@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::fmt::{Debug, Display};
 use std::ops::{Add, BitAnd, BitOr, BitXor, Not, Shl, Shr, Sub};
 use std::ops::{AddAssign, BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign, SubAssign};
-use std::sync::atomic::{self, Ordering};
+use std::sync::atomic::Ordering;
 
 // Cheap unsigned integer cast.
 pub trait As<T: Copy>: Copy {
