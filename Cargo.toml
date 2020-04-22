@@ -1,7 +1,15 @@
 [package]
 name = "psacak"
-version = "0.0.3"
+version = "0.1.0"
 edition = "2018"
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/hucsmn/psacak"
+repository = "https://github.com/hucsmn/psacak"
+categories = ["algorithms"]
+keywords = ["suffix_array", "suffix", "saca", "parallel"]
+exclude = ["/bench/**"]
+description = "The pSACAK suffix sorting algorithm for huge in-memory data on multicore machines."
 
 [dependencies]
 cfg-if = "0.1"

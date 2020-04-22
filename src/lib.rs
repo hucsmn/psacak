@@ -1,4 +1,4 @@
-//! The pSACAK suffix sorting algorithm for huge in-memory data on multicore machine.
+//! The pSACAK suffix sorting algorithm for huge in-memory data on multicore machines.
 //!
 //! The algorithm is described in this [paper](https://doi.org/10.1109/TC.2018.2842050).
 //!
